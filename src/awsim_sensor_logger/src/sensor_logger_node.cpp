@@ -3,6 +3,7 @@
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <chrono>
 #include <memory>
 
@@ -16,6 +17,7 @@ public:
         camera_count_ = 0;
         imu_count_ = 0;
         gnss_count_ = 0;
+        ground_truth_count_ = 0;
 
         // Create subscribers with appropriate QoS
         auto sensor_qos = rclcpp::QoS(10).reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
@@ -36,6 +38,10 @@ public:
         gnss_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
             "/sensing/gnss/pose_with_covariance", default_qos,
             std::bind(&SensorLoggerNode::gnss_callback, this, std::placeholders::_1));
+
+        ground_truth_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "/awsim/ground_truth/localization/kinematic_state", default_qos,
+            std::bind(&SensorLoggerNode::ground_truth_callback, this, std::placeholders::_1));
 
         // Create timer for status reporting
         timer_ = this->create_wall_timer(
@@ -85,6 +91,17 @@ private:
         RCLCPP_INFO(this->get_logger(), "GNSS: %d messages received", gnss_count_);
     }
 
+    void ground_truth_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
+    {
+        ground_truth_count_++;
+        last_ground_truth_time_ = this->get_clock()->now();
+        
+        if (ground_truth_count_ % 20 == 0) {
+            RCLCPP_INFO(this->get_logger(), "Ground Truth: %d messages received (pos: %.2f, %.2f)", 
+                       ground_truth_count_, msg->pose.pose.position.x, msg->pose.pose.position.y);
+        }
+    }
+
     void status_callback()
     {
         RCLCPP_INFO(this->get_logger(), "=== Sensor Status ===");
@@ -92,6 +109,7 @@ private:
         RCLCPP_INFO(this->get_logger(), "Camera: %d msgs", camera_count_);
         RCLCPP_INFO(this->get_logger(), "IMU: %d msgs", imu_count_);
         RCLCPP_INFO(this->get_logger(), "GNSS: %d msgs", gnss_count_);
+        RCLCPP_INFO(this->get_logger(), "Ground Truth: %d msgs", ground_truth_count_);
     }
 
     // Subscribers
@@ -99,6 +117,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr camera_sub_;
     rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr gnss_sub_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr ground_truth_sub_;
     
     // Timer
     rclcpp::TimerBase::SharedPtr timer_;
@@ -108,12 +127,14 @@ private:
     int camera_count_;
     int imu_count_;
     int gnss_count_;
+    int ground_truth_count_;
     
     // Timestamps
     rclcpp::Time last_lidar_time_;
     rclcpp::Time last_camera_time_;
     rclcpp::Time last_imu_time_;
     rclcpp::Time last_gnss_time_;
+    rclcpp::Time last_ground_truth_time_;
 };
 
 int main(int argc, char * argv[])
