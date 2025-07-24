@@ -12,6 +12,14 @@ find_package(std_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(message_filters REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(pcl_conversions REQUIRED)
+find_package(pcl_ros REQUIRED)
+find_package(autoware_vehicle_msgs REQUIRED)
+find_package(PCL REQUIRED COMPONENTS common io)
 
 # Add executable
 add_executable(sensor_logger_node src/sensor_logger_node.cpp)
@@ -20,11 +28,35 @@ ament_target_dependencies(sensor_logger_node
   std_msgs 
   sensor_msgs 
   geometry_msgs 
-  nav_msgs)
+  nav_msgs
+  message_filters
+  tf2_ros
+  tf2_geometry_msgs
+  cv_bridge
+  pcl_conversions
+  pcl_ros
+  autoware_vehicle_msgs)
+
+# Link PCL libraries
+target_link_libraries(sensor_logger_node ${PCL_LIBRARIES})
+target_include_directories(sensor_logger_node PRIVATE ${PCL_INCLUDE_DIRS})
+target_compile_definitions(sensor_logger_node PRIVATE ${PCL_DEFINITIONS})
 
 # Install targets
 install(TARGETS
   sensor_logger_node
+  DESTINATION lib/${PROJECT_NAME})
+
+# Install launch files
+install(DIRECTORY launch/
+  DESTINATION share/${PROJECT_NAME}/launch)
+
+# Install config files
+install(DIRECTORY config/
+  DESTINATION share/${PROJECT_NAME}/config)
+
+# Install scripts
+install(PROGRAMS scripts/analyze_sensor_data.py
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

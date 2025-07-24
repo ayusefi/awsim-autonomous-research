@@ -1,0 +1,19 @@
+# AWSIM Synchronized Sensor Logger Configuration
+
+# Data Collection Settings
+output_directory: "/tmp/awsim_sensor_data"
+logging_duration_sec: 300  # 5 minutes
+sync_tolerance_sec: 0.1    # 100ms synchronization tolerance
+
+# Data Storage Options
+save_pointclouds: true    # Save LiDAR point clouds as PCD files
+save_images: true         # Save camera images as PNG files
+save_raw_data: true       # Save synchronized sensor data to CSV
+
+# Synchronization Settings
+queue_size: 10            # Message queue size for message_filters
+
+# Performance Tuning (Advanced)
+# Adjust these if you experience synchronization issues
+# sync_policy_max_interval_duration: 0.3  # Maximum interval between messages
+# sync_policy_age_penalty: 1.0            # Age penalty for late messages
