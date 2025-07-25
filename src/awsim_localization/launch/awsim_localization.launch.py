@@ -15,6 +15,11 @@ def generate_launch_description():
     return LaunchDescription([
         # Launch arguments
         DeclareLaunchArgument(
+            'algorithm_type',
+            default_value='ndt', 
+            description='Localization algorithm: ndt or icp'
+        ),
+        DeclareLaunchArgument(
             'map_path', 
             default_value='/home/abdullah/workspaces/career_sprint/awsim-autonomous-research/shinjuku_map/map/pointcloud_map.pcd',
             description='Path to the point cloud map file'
@@ -65,9 +70,29 @@ def generate_launch_description():
             description='Number of threads for NDT'
         ),
         DeclareLaunchArgument(
+            'icp_max_iterations', 
+            default_value='35',
+            description='ICP/GICP maximum iterations (optimized from reference)'
+        ),
+        DeclareLaunchArgument(
+            'icp_transformation_epsilon', 
+            default_value='0.01',
+            description='ICP/GICP transformation epsilon (optimized from reference)'
+        ),
+        DeclareLaunchArgument(
+            'icp_max_correspondence_distance', 
+            default_value='1.0',
+            description='ICP/GICP maximum correspondence distance'
+        ),
+        DeclareLaunchArgument(
+            'icp_euclidean_fitness_epsilon', 
+            default_value='0.01',
+            description='ICP/GICP euclidean fitness epsilon'
+        ),
+        DeclareLaunchArgument(
             'voxel_leaf_size', 
             default_value='0.5',
-            description='Voxel grid leaf size for point cloud filtering'
+            description='Voxel grid leaf size (optimized for GICP from reference)'
         ),
         DeclareLaunchArgument(
             'lidar_max_range', 
@@ -82,7 +107,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'scan_matching_score_threshold', 
             default_value='200.0',
-            description='Scan matching fitness score threshold'
+            description='Scan matching fitness score threshold (optimized for GICP)'
         ),
         DeclareLaunchArgument(
             'publish_tf', 
@@ -91,7 +116,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'use_ground_truth_init', 
-            default_value='true',
+            default_value='false',
             description='Whether to initialize pose from ground truth'
         ),
         DeclareLaunchArgument(
@@ -130,6 +155,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{
                 'use_sim_time': True,  # Enable simulation time for AWSIM
+                'algorithm_type': LaunchConfiguration('algorithm_type'),
                 'map_path': LaunchConfiguration('map_path'),
                 'map_frame': LaunchConfiguration('map_frame'),
                 'base_link_frame': LaunchConfiguration('base_link_frame'),
@@ -144,6 +170,10 @@ def generate_launch_description():
                 'ndt_transformation_epsilon': LaunchConfiguration('ndt_transformation_epsilon'),
                 'ndt_step_size': LaunchConfiguration('ndt_step_size'),
                 'ndt_num_threads': LaunchConfiguration('ndt_num_threads'),
+                'icp_max_iterations': LaunchConfiguration('icp_max_iterations'),
+                'icp_transformation_epsilon': LaunchConfiguration('icp_transformation_epsilon'),
+                'icp_max_correspondence_distance': LaunchConfiguration('icp_max_correspondence_distance'),
+                'icp_euclidean_fitness_epsilon': LaunchConfiguration('icp_euclidean_fitness_epsilon'),
                 'voxel_leaf_size': LaunchConfiguration('voxel_leaf_size'),
                 'lidar_max_range': LaunchConfiguration('lidar_max_range'),
                 'lidar_min_range': LaunchConfiguration('lidar_min_range'),

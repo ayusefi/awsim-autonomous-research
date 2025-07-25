@@ -96,6 +96,9 @@ AwsimLocalizationNode::AwsimLocalizationNode(const rclcpp::NodeOptions & options
 
 void AwsimLocalizationNode::declareParameters()
 {
+  // Algorithm selection parameter
+  this->declare_parameter("algorithm_type", "ndt");  // "ndt" or "icp"
+  
   // Map and frame parameters
   this->declare_parameter("map_path", "/home/abdullah/workspaces/career_sprint/awsim-autonomous-research/shinjuku_map/map/pointcloud_map.pcd");
   this->declare_parameter("map_frame", "map");
@@ -115,6 +118,12 @@ void AwsimLocalizationNode::declareParameters()
   this->declare_parameter("ndt_transformation_epsilon", 0.01);
   this->declare_parameter("ndt_step_size", 0.1);
   this->declare_parameter("ndt_num_threads", 4);
+  
+  // ICP parameters
+  this->declare_parameter("icp_max_iterations", 50);
+  this->declare_parameter("icp_transformation_epsilon", 1e-6);
+  this->declare_parameter("icp_max_correspondence_distance", 1.0);
+  this->declare_parameter("icp_euclidean_fitness_epsilon", 0.01);
   
   // Filtering parameters
   this->declare_parameter("voxel_leaf_size", 0.5);

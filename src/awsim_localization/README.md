@@ -1,6 +1,6 @@
-# AWSIM NDT Localization - Real-Time Vehicle Positioning for Autonomous Driving
+# AWSIM Localization - Real-Time Vehicle Positioning for Autonomous Driving
 
-> Achieve centimeter-level vehicle localization in AWSIM using NDT scan matching - your autonomous vehicle knows exactly where it is at all times!
+> Achieve centimeter-level vehicle localization in AWSIM using NDT or GICP scan matching - your autonomous vehicle knows exactly where it is at all times!
 
 ## See It In Action
 
@@ -16,10 +16,38 @@ Ready to get localized? Here's how to run it:
 # Step 1: Launch AWSIM simulation first
 ./AWSIM.x86_64
 
-# Step 2: Start NDT localization with RViz visualization
+# Step 2: Start localization with NDT (default)
 ros2 launch awsim_localization awsim_localization.launch.py
 
-# Step 3: Give initial pose from rviz and see the vehicle localized.
+# Step 3: Or use GICP algorithm instead
+ros2 launch awsim_localization awsim_localization.launch.py algorithm_type:=icp
+
+# Step 4: Give initial pose from rviz and see the vehicle localized.
+```
+
+## Algorithm Selection
+
+You can now choose between two powerful scan matching algorithms:
+
+### 🎯 NDT (Normal Distributions Transform) - Default
+- **Best for**: Large-scale environments, real-time performance
+- **Strengths**: Fast convergence, robust to noise, good for sparse data
+- **Use case**: General localization, when speed is priority
+
+### 🔍 GICP (Generalized Iterative Closest Point)
+- **Best for**: High-precision requirements, structured environments  
+- **Strengths**: High accuracy, good surface matching, precise alignment
+- **Use case**: When maximum precision is needed, detailed environments
+
+```bash
+# Use NDT (default)
+ros2 launch awsim_localization awsim_localization.launch.py algorithm_type:=ndt
+
+# Use GICP for higher precision
+ros2 launch awsim_localization awsim_localization.launch.py algorithm_type:=icp
+
+# Use the dedicated GICP launch file with optimized parameters
+ros2 launch awsim_localization awsim_localization_icp.launch.py
 ```
 
 ## What You Get
@@ -112,6 +140,7 @@ This implementation uses the high-performance NDT OMP (OpenMP) library for fast 
 
 ### Core Parameters
 
+- `algorithm_type` (string, default: "ndt") - Scan matching algorithm: "ndt" or "icp"
 - `map_path` (string, default: path to shinjuku map) - Path to point cloud map file (.pcd)
 - `map_frame` (string, default: "map") - Map coordinate frame
 - `base_link_frame` (string, default: "base_link") - Vehicle base frame
@@ -124,6 +153,13 @@ This implementation uses the high-performance NDT OMP (OpenMP) library for fast 
 - `ndt_transformation_epsilon` (double, default: 0.01) - Transformation convergence threshold
 - `ndt_step_size` (double, default: 0.1) - NDT optimization step size
 - `ndt_num_threads` (int, default: 4) - Number of threads for NDT processing
+
+### ICP/GICP Parameters
+
+- `icp_max_iterations` (int, default: 50) - Maximum ICP iterations
+- `icp_transformation_epsilon` (double, default: 1e-6) - ICP transformation convergence threshold  
+- `icp_max_correspondence_distance` (double, default: 1.0) - Maximum distance for point correspondences
+- `icp_euclidean_fitness_epsilon` (double, default: 0.01) - Euclidean fitness convergence threshold
 
 ### Filtering Parameters
 

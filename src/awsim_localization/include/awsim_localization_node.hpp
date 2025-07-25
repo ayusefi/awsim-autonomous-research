@@ -31,6 +31,7 @@
 
 #include <pclomp/ndt_omp.h>
 #include <pclomp/ndt_omp_impl.hpp>
+#include <pclomp/gicp_omp.h>
 
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
@@ -49,8 +50,12 @@ public:
   ~AwsimLocalizationNode() = default;
 
 private:
-  // Core NDT localization
+  // Algorithm selection
+  std::string algorithm_type_;  // "ndt" or "icp"
+  
+  // Core localization algorithms
   std::unique_ptr<pclomp::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>> ndt_;
+  std::unique_ptr<pclomp::GeneralizedIterativeClosestPoint<pcl::PointXYZI, pcl::PointXYZI>> gicp_;
   pcl::VoxelGrid<pcl::PointXYZI> voxel_grid_;
   pcl::PointCloud<pcl::PointXYZI>::Ptr map_cloud_;
   
@@ -89,6 +94,12 @@ private:
   double ndt_transformation_epsilon_;
   double ndt_step_size_;
   int ndt_num_threads_;
+  
+  // ICP/GICP parameters
+  int icp_max_iterations_;
+  double icp_transformation_epsilon_;
+  double icp_max_correspondence_distance_;
+  double icp_euclidean_fitness_epsilon_;
   
   // Filtering parameters
   double voxel_leaf_size_;
