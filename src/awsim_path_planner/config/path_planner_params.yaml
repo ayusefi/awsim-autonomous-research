@@ -1,0 +1,81 @@
+# AWSIM Path Planner Configuration
+
+# General Path Planning Parameters
+path_planner:
+  # Planning algorithm: "astar" or "rrt_star"
+  planning_algorithm: "astar"
+  
+  # Coordinate frames
+  map_frame: "map"
+  base_link_frame: "base_link"
+  
+  # HD Map configuration
+  hd_map_path: ""  # Path to Lanelet2 OSM file
+  use_hd_map_constraints: true
+  
+  # Planning bounds
+  grid_resolution: 0.5          # Grid resolution in meters (A* only)
+  planning_timeout: 5.0         # Maximum planning time in seconds
+  max_planning_range: 500.0     # Maximum planning distance in meters
+  
+  # Visualization
+  visualize_search_space: true  # Show algorithm search progress
+  
+  # A* Algorithm Parameters
+  astar:
+    heuristic_weight: 1.0         # A* heuristic weight (1.0 = A*, >1.0 = weighted A*)
+    search_radius: 100.0          # Search radius around start/goal in meters
+    obstacle_inflation_radius: 1.0 # Obstacle inflation radius in meters
+    
+  # RRT* Algorithm Parameters  
+  rrt_star:
+    max_iterations: 5000          # Maximum number of RRT* iterations
+    step_size: 2.0               # Step size for tree extension in meters
+    goal_tolerance: 2.0          # Goal reach tolerance in meters
+    rewiring_radius: 10.0        # Radius for rewiring nearby nodes in meters
+    goal_bias_probability: 0.1   # Probability of sampling goal (0.0-1.0)
+    obstacle_check_resolution: 0.5 # Resolution for collision checking in meters
+  
+  # Ground Filtering Parameters
+  ground_filter:
+    height_threshold: 1.5        # Minimum height above ground to consider as obstacle (meters) - much more permissive
+    angle_threshold: 30.0        # Minimum angle from horizontal to consider non-ground (degrees) - much more permissive
+  
+  # Dynamic Obstacle Detection
+  dynamic_obstacle_max_range: 50.0  # Maximum range for dynamic obstacles from raw point cloud (meters)
+
+# Topic Configuration
+topics:
+  # Input topics
+  current_pose: "/localization/pose_with_covariance"
+  goal_pose: "/planning/goal_pose"
+  map_pointcloud: "/localization/map"              # Static map point cloud
+  raw_pointcloud: "/sensing/lidar/top/pointcloud_raw"  # Dynamic obstacle detection
+  
+  # Output topics
+  planned_path: "/planning/path"
+  visualization_markers: "/planning/visualization_markers"
+  occupancy_grid: "/planning/occupancy_grid"
+
+# HD Map Integration Parameters
+hd_map:
+  lane_width: 3.5                    # Standard lane width in meters
+  boundary_buffer: 0.5               # Buffer distance from lane boundaries
+  driveable_area_buffer: 2.0         # Buffer for driveable area detection
+  
+  # Cost function weights
+  off_lane_penalty: 100.0            # Penalty for being off driveable lanes
+  boundary_proximity_penalty: 50.0   # Penalty for being close to boundaries
+  speed_deviation_penalty: 10.0      # Penalty for speed limit violations
+
+# Performance Tuning
+performance:
+  # A* specific optimizations
+  astar_max_open_set_size: 10000     # Maximum size of A* open set
+  
+  # RRT* specific optimizations  
+  rrt_star_obstacle_check_points: 10 # Number of points to check along each edge
+  
+  # General optimizations
+  path_smoothing_enabled: true       # Enable path smoothing post-processing
+  parallel_processing: false        # Enable parallel processing (if available)
