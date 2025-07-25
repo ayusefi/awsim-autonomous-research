@@ -1,57 +1,85 @@
 # AWSIM Autonomous Research
 
-My journey into autonomous driving development using the AWSIM simulator. This repo contains the experiments and algorithms I'm building to understand and implement autonomous vehicle systems.
+My journey into autonomous driving development using the AWSIM simulator. This repository contains SLAM algorithms, sensor processing systems, and autonomous vehicle research implementations.
 
-## What I'm Working On
+## 🚗 What's Implemented
 
-Currently focused on getting familiar with AWSIM's sensor data and building a solid foundation for autonomous driving algorithms. The main areas I'm exploring:
+### NDT Localization System ✅
+- **Real-time vehicle positioning** using Normal Distributions Transform  
+- **Centimeter-level accuracy** with pre-built map matching
+- **AWSIM integration** with proper sensor transforms and timing
+- **Live visualization** in RViz2 with pose tracking and fitness scores
+- **Automatic initialization** from ground truth for seamless startup
 
-- Multi-sensor data integration from AWSIM
-- SLAM algorithms for mapping and localization  
-- Real-time perception systems
-- Vehicle control strategies
+### Sensor Data Processing ✅
+- **Multi-sensor data logging** from AWSIM
+- **Synchronized data capture** (LiDAR, cameras, IMU)
+- **Real-time data analysis** and visualization
+- **Point cloud filtering** and preprocessing
 
 ## Repository Structure
 
 ```
 src/
-├── awsim_sensor_logger/    # Sensor data logging and analysis
-├── awsim_bringup/         # Launch files and configurations
-└── (more packages coming soon)
+├── awsim_localization/    # NDT-based localization with pre-built maps
+├── awsim_sensor_logger/   # Multi-sensor data logging and analysis  
+├── awsim_bringup/         # Launch files and system integration
+└── config/                # Parameter files and configurations
 ```
 
-## Getting Started
+## 🚀 Quick Start
 
-You'll need ROS 2 Humble and the AWSIM simulator to run these experiments.
-
-```bash
-# Install dependencies
-sudo apt install ros-humble-desktop-full
-sudo apt install python3-colcon-common-extensions
-
-# Build the workspace
-colcon build --symlink-install
-source install/setup.bash
-
-# Run the sensor logger
-ros2 launch awsim_bringup sensor_logger.launch.py
-```
-
-Make sure to start AWSIM first before running any nodes.
-
-## Current Progress
-
-- [x] Basic sensor data logging from AWSIM
-- [ ] Sensor synchronization and calibration
-- [ ] 2D SLAM implementation
-- [ ] Object detection pipeline
-
-## Tech Stack
-
+### Prerequisites
 - ROS 2 Humble
-- C++17
-- AWSIM v1.3.1
+- AWSIM simulator
+- PCL library for point cloud processing
 
-This is an ongoing learning project as I dive deeper into autonomous driving technology.
+### Installation
+```bash
+# Clone and build
+git clone <this-repo>
+cd awsim-autonomous-research
+colcon build
+source install/setup.bash
+```
 
-⭐ If you find this project helpful or interesting, please give it a star!
+### Launch NDT Localization
+```bash
+# Start AWSIM first, then launch localization with RViz
+ros2 launch awsim_localization awsim_localization.launch.py
+
+# For custom map or parameters
+ros2 launch awsim_localization awsim_localization.launch.py \
+    map_path:=/path/to/your/map.pcd \
+    ndt_resolution:=1.5
+```
+
+
+## 📚 Documentation
+
+- **[NDT Localization Guide](src/awsim_localization/README.md)** - Real-time positioning with demonstration video
+- **[Sensor Logger Guide](src/awsim_sensor_logger/README.md)** - Multi-sensor data collection and analysis
+
+## 🧪 Testing & Validation
+
+### NDT Localization Testing
+```bash
+# Launch localization and monitor performance
+ros2 launch awsim_localization awsim_localization.launch.py
+ros2 topic hz /localization/pose_with_covariance
+ros2 topic echo /localization/status
+
+# Check NDT fitness scores (lower is better)
+ros2 topic echo /localization/markers
+```
+
+## 📈 Future Research Directions
+
+- **Advanced localization** with multi-sensor fusion (LiDAR + GNSS + IMU)
+- **Deep learning integration** for semantic mapping
+- **Multi-sensor fusion** with camera and IMU data
+- **Dynamic environment handling** for moving objects
+
+⭐ **If you find this project helpful for your autonomous driving research, please give it a star!**
+
+---

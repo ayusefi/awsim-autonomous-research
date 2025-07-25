@@ -7,6 +7,7 @@ log/
 # AWSIM related
 AWSIM_v1.3.1/
 AWSIM_Comprehensive_*
+shinjuku_map/
 
 # Python
 __pycache__/
