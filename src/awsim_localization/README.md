@@ -111,14 +111,6 @@ source install/setup.bash
 - OpenMP for parallel processing
 - AWSIM v1.3.1+ for simulation
 
-## NDT OMP Library Credits
-
-This implementation uses the high-performance NDT OMP (OpenMP) library for fast scan matching:
-
-- **[ndt_omp](https://github.com/koide3/ndt_omp)** by Kenji Koide - The core NDT OpenMP implementation
-- **[ndt_omp_ros2](https://github.com/rsasaki0109/ndt_omp_ros2)** by rsasaki0109 - ROS2 integration and examples
-
-
 ## Topics
 
 ### Subscribed Topics
@@ -248,12 +240,3 @@ MIT License - see LICENSE file for details.
 
 ### Academic References
 - Biber, Peter, and Wolfgang Straßer. "The normal distributions transform: A new approach to laser scan matching." *Proceedings 2003 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS 2003)*. Vol. 3. IEEE, 2003.
-
-### Implementation Notes
-This package adapts the NDT OMP library specifically for AWSIM localization scenarios, with optimizations for:
-- Real-time performance in simulation environments
-- Coordinate system handling for large-scale maps  
-- Integration with AWSIM's sensor data pipeline
-- RViz visualization and debugging tools
-
-**Acknowledgments:** Special thanks to Kenji Koide for the excellent NDT OMP implementation and rsasaki0109 for the ROS2 integration work that made this package possible.
