@@ -4,7 +4,7 @@
 
 ## See It In Action
 
-![NDT Localization Demo](assets/ndt.mp4)
+[![NDT Localization Demo](https://img.youtube.com/vi/b5t8RxWgBh8/0.jpg)](https://youtu.be/b5t8RxWgBh8)
 
 *Watch the NDT localization system in action: real-time pose estimation and scan matching visualization in AWSIM simulation environment.*
 
