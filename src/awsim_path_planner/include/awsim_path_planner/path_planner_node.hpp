@@ -12,6 +12,11 @@
 #include <tf2_ros/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
+// PCL headers for advanced ground filtering
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/PointIndices.h>
+
 #include <memory>
 #include <vector>
 #include <string>
@@ -45,13 +50,26 @@ private:
   // Utility functions
   void publish_path(const std::vector<geometry_msgs::msg::PoseStamped> & path);
   void publish_visualization_markers();
+  void publish_occupancy_grid();
+  void update_occupancy_grid();
   geometry_msgs::msg::PoseStamped transform_pose(
     const geometry_msgs::msg::PoseStamped & pose_in,
     const std::string & target_frame);
   
-  // Point cloud processing functions
+  // Point cloud processing functions - enhanced ground filtering
   sensor_msgs::msg::PointCloud2::SharedPtr filter_ground_points(
     const sensor_msgs::msg::PointCloud2::SharedPtr & pointcloud, bool is_map_data = false);
+  
+  // Advanced ground filtering methods
+  pcl::PointIndices::Ptr ransac_ground_detection(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud);
+  pcl::PointIndices::Ptr progressive_morphological_filter(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud);
+  pcl::PointIndices::Ptr multi_hypothesis_ground_detection(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud);
+  pcl::PointCloud<pcl::PointXYZ>::Ptr preprocess_cloud(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud, bool is_map_data);
+  
   sensor_msgs::msg::PointCloud2::SharedPtr combine_pointclouds(
     const sensor_msgs::msg::PointCloud2::SharedPtr & map_cloud,
     const sensor_msgs::msg::PointCloud2::SharedPtr & dynamic_cloud);
@@ -65,6 +83,9 @@ private:
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
+  
+  // Timer for periodic occupancy grid publishing
+  rclcpp::TimerBase::SharedPtr grid_timer_;
   
   // TF2
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -97,10 +118,23 @@ private:
   bool use_hd_map_constraints_;
   bool visualize_search_space_;
   
-  // Ground filtering parameters
+  // Ground filtering parameters - enhanced for advanced filtering
   double ground_filter_height_threshold_;
   double ground_filter_angle_threshold_;
   double dynamic_obstacle_max_range_;
+  
+  // RANSAC ground plane detection parameters
+  double ransac_distance_threshold_;
+  int ransac_max_iterations_;
+  int min_ground_points_;
+  double voxel_leaf_size_;
+  
+  // Progressive Morphological Filtering parameters
+  bool use_progressive_morphological_;
+  int pmf_max_window_size_;
+  double pmf_slope_;
+  double pmf_initial_distance_;
+  double pmf_max_distance_;
 };
 
 }  // namespace awsim_path_planner

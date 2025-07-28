@@ -73,6 +73,8 @@ public:
   // Visualization
   visualization_msgs::msg::MarkerArray get_search_visualization() const;
   nav_msgs::msg::OccupancyGrid get_occupancy_grid() const;
+  void update_grid_for_visualization(const geometry_msgs::msg::PoseStamped& vehicle_pose,
+                                     const sensor_msgs::msg::PointCloud2::SharedPtr& cloud);
 
 private:
   // Core A* algorithm
@@ -81,6 +83,7 @@ private:
   // Grid and coordinate utilities
   void initialize_grid(const geometry_msgs::msg::PoseStamped& start, 
                        const geometry_msgs::msg::PoseStamped& goal);
+  void initialize_vehicle_centered_grid(const geometry_msgs::msg::PoseStamped& vehicle_pose);
   void update_obstacles_from_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud);
   GridNode world_to_grid(double world_x, double world_y) const;
   std::pair<double, double> grid_to_world(const GridNode& node) const;
@@ -103,6 +106,7 @@ private:
   // Grid management
   void clear_grid();
   void inflate_obstacles();
+  void clear_area_around_position(double world_x, double world_y, double radius);
   
   // ROS components
   rclcpp::Node* node_;
@@ -123,11 +127,11 @@ private:
   mutable std::vector<GridNode> frontier_nodes_;
   mutable std::vector<geometry_msgs::msg::PoseStamped> final_path_;
   
-  // Constants
+  // Constants - ROS occupancy grid standard: 0=free, 100=occupied, -1=unknown
   static constexpr double DIAGONAL_COST = 1.414;  // sqrt(2)
   static constexpr double STRAIGHT_COST = 1.0;
-  static constexpr int OBSTACLE_VALUE = 100;
-  static constexpr int FREE_VALUE = 0;
+  static constexpr int FREE_VALUE = 0;       // White (free space)
+  static constexpr int OBSTACLE_VALUE = 100; // Black (obstacles)
   static constexpr int UNKNOWN_VALUE = -1;
   
   // Movement directions (8-connected)

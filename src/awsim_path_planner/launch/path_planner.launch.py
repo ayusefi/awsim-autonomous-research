@@ -73,9 +73,18 @@ def generate_launch_description():
             'rrt_star.goal_tolerance': 2.0,
             'rrt_star.rewiring_radius': 10.0,
             
-            # Ground filtering parameters
-            'ground_filter.height_threshold': 0.3,
-            'ground_filter.angle_threshold': 15.0,
+            # Ground filtering parameters - fixed for better performance
+            'ground_filter.height_threshold': 2.0,  # More permissive height threshold
+            'ground_filter.angle_threshold': 45.0,  # More permissive angle
+            'ground_filter.ransac_distance_threshold': 0.3,  # More permissive RANSAC
+            'ground_filter.ransac_max_iterations': 500,  # Reduced iterations for speed
+            'ground_filter.min_ground_points': 200,  # Lower minimum ground points
+            'ground_filter.voxel_leaf_size': 0.2,  # Larger voxel size to prevent overflow
+            'ground_filter.use_progressive_morphological': False,  # Disable for map data
+            'ground_filter.pmf_max_window_size': 33,
+            'ground_filter.pmf_slope': 1.0,
+            'ground_filter.pmf_initial_distance': 0.5,
+            'ground_filter.pmf_max_distance': 3.0,
             'dynamic_obstacle_max_range': 50.0,
         }],
         remappings=[

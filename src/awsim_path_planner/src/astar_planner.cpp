@@ -40,13 +40,18 @@ std::vector<geometry_msgs::msg::PoseStamped> AStarPlanner::plan_path(
   frontier_nodes_.clear();
   final_path_.clear();
   
-  // Initialize grid based on start and goal positions
-  initialize_grid(start, goal);
+  // Initialize vehicle-centered grid instead of start/goal centered
+  initialize_vehicle_centered_grid(start);
   
   // Update obstacles from pointcloud if available
   if (obstacles) {
     update_obstacles_from_pointcloud(obstacles);
     inflate_obstacles();
+    
+    // Clear areas around start and goal positions to ensure they're not blocked
+    double clear_radius = std::max(2.0, obstacle_inflation_radius_ * 1.5);
+    clear_area_around_position(start.pose.position.x, start.pose.position.y, clear_radius);
+    clear_area_around_position(goal.pose.position.x, goal.pose.position.y, clear_radius);
   }
   
   // Convert start and goal to grid coordinates
@@ -216,6 +221,27 @@ void AStarPlanner::initialize_grid(const geometry_msgs::msg::PoseStamped& start,
               grid_width_, grid_height_, grid_resolution_);
 }
 
+void AStarPlanner::initialize_vehicle_centered_grid(const geometry_msgs::msg::PoseStamped& vehicle_pose)
+{
+  // Create a square grid centered on the vehicle position
+  double half_grid_size = search_radius_;
+  
+  // Set grid origin (bottom-left corner of vehicle-centered grid)
+  origin_x_ = vehicle_pose.pose.position.x - half_grid_size;
+  origin_y_ = vehicle_pose.pose.position.y - half_grid_size;
+  
+  // Calculate grid dimensions (square grid)
+  grid_width_ = static_cast<int>((2.0 * half_grid_size) / grid_resolution_) + 1;
+  grid_height_ = static_cast<int>((2.0 * half_grid_size) / grid_resolution_) + 1;
+  
+  // Initialize occupancy grid with unknown values (will be updated with sensor data)
+  occupancy_grid_.assign(grid_height_, std::vector<int>(grid_width_, FREE_VALUE));
+  
+  RCLCPP_DEBUG(node_->get_logger(), 
+    "Initialized vehicle-centered %dx%d grid at (%.2f, %.2f) with resolution %.2f m",
+    grid_width_, grid_height_, origin_x_, origin_y_, grid_resolution_);
+}
+
 void AStarPlanner::update_obstacles_from_pointcloud(const sensor_msgs::msg::PointCloud2::SharedPtr& cloud)
 {
   // Convert ROS PointCloud2 to PCL PointCloud
@@ -242,6 +268,19 @@ void AStarPlanner::update_obstacles_from_pointcloud(const sensor_msgs::msg::Poin
   }
   
   RCLCPP_INFO(node_->get_logger(), "Added %d obstacle points from pointcloud", obstacle_count);
+}
+
+void AStarPlanner::update_grid_for_visualization(const geometry_msgs::msg::PoseStamped& vehicle_pose,
+                                                 const sensor_msgs::msg::PointCloud2::SharedPtr& cloud)
+{
+  // Initialize vehicle-centered grid
+  initialize_vehicle_centered_grid(vehicle_pose);
+  
+  // Update obstacles from point cloud if available
+  if (cloud) {
+    update_obstacles_from_pointcloud(cloud);
+    inflate_obstacles();
+  }
 }
 
 GridNode AStarPlanner::world_to_grid(double world_x, double world_y) const
@@ -437,6 +476,26 @@ void AStarPlanner::inflate_obstacles()
   }
   
   occupancy_grid_ = inflated_grid;
+}
+
+void AStarPlanner::clear_area_around_position(double world_x, double world_y, double radius)
+{
+  GridNode center = world_to_grid(world_x, world_y);
+  int clear_cells = static_cast<int>(radius / grid_resolution_) + 1;
+  
+  for (int dy = -clear_cells; dy <= clear_cells; ++dy) {
+    for (int dx = -clear_cells; dx <= clear_cells; ++dx) {
+      int new_x = center.x + dx;
+      int new_y = center.y + dy;
+      
+      if (is_valid_node({new_x, new_y})) {
+        double distance = std::sqrt(dx * dx + dy * dy) * grid_resolution_;
+        if (distance <= radius) {
+          occupancy_grid_[new_y][new_x] = FREE_VALUE;
+        }
+      }
+    }
+  }
 }
 
 visualization_msgs::msg::MarkerArray AStarPlanner::get_search_visualization() const
