@@ -4,7 +4,7 @@
 
 ## Demo Video
 
-[![AWSIM Path Planner Demo - A* Planning with Lanelet Visualization](https://img.youtube.com/vi/ga-dqycrPSM/0.jpg)](https://www.youtube.com/watch?v=ga-dqycrPSM)
+[![AWSIM Path Planner Demo - A* Planning with Lanelet Visualization](https://img.youtube.com/vi/BkTIht2Hry4/0.jpg)](https://www.youtube.com/watch?v=BkTIht2Hry4)
 
 *Click to watch: Current A* path planner with comprehensive HD map visualization showing lanelets, traffic lights, signs, and crosswalks*
 
