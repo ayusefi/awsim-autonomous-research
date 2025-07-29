@@ -26,13 +26,13 @@ def generate_launch_description():
     
     use_hd_map_arg = DeclareLaunchArgument(
         'use_hd_map_constraints',
-        default_value='false',  # Disable HD map constraints - implementation incomplete
+        default_value='true',
         description='Enable HD map constraints for path planning'
     )
     
     enforce_traffic_rules_arg = DeclareLaunchArgument(
         'enforce_traffic_rules',
-        default_value='false',  # Disable traffic rules - HD map incomplete
+        default_value='true',
         description='Enforce traffic rules from HD map'
     )
     
@@ -44,7 +44,7 @@ def generate_launch_description():
     
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz',
-        default_value='true',
+        default_value='false',
         description='Launch RViz for visualization'
     )
     
