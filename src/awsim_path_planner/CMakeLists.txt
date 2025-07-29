@@ -66,6 +66,11 @@ add_executable(${PROJECT_NAME}_node src/main.cpp)
 target_link_libraries(${PROJECT_NAME}_node ${PROJECT_NAME}_lib)
 ament_target_dependencies(${PROJECT_NAME}_node ${dependencies})
 
+# Lanelet visualizer executable
+add_executable(lanelet_visualizer_node src/lanelet_visualizer_node.cpp)
+target_link_libraries(lanelet_visualizer_node ${PROJECT_NAME}_lib)
+ament_target_dependencies(lanelet_visualizer_node ${dependencies})
+
 # Install targets
 install(TARGETS
   ${PROJECT_NAME}_lib
@@ -76,6 +81,7 @@ install(TARGETS
 
 install(TARGETS
   ${PROJECT_NAME}_node
+  lanelet_visualizer_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

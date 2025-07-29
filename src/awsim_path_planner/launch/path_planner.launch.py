@@ -20,8 +20,20 @@ def generate_launch_description():
     
     hd_map_path_arg = DeclareLaunchArgument(
         'hd_map_path',
-        default_value='',  # Empty for basic testing without HD map
-        description='Path to HD map file (OSM format) - disabled for basic testing'
+        default_value='/home/abdullah/workspaces/career_sprint/awsim-autonomous-research/shinjuku_map/map/lanelet2_map.osm',
+        description='Path to HD map file (Lanelet2 OSM format)'
+    )
+    
+    use_hd_map_arg = DeclareLaunchArgument(
+        'use_hd_map_constraints',
+        default_value='false',  # Disable HD map constraints - implementation incomplete
+        description='Enable HD map constraints for path planning'
+    )
+    
+    enforce_traffic_rules_arg = DeclareLaunchArgument(
+        'enforce_traffic_rules',
+        default_value='false',  # Disable traffic rules - HD map incomplete
+        description='Enforce traffic rules from HD map'
     )
     
     grid_resolution_arg = DeclareLaunchArgument(
@@ -55,11 +67,14 @@ def generate_launch_description():
             'planning_algorithm': LaunchConfiguration('planning_algorithm'),
             'map_frame': 'map',
             'base_link_frame': 'base_link',
-            'hd_map_path': '',  # Disabled for basic testing
+            'hd_map_path': LaunchConfiguration('hd_map_path'),
             'grid_resolution': LaunchConfiguration('grid_resolution'),
             'planning_timeout': 5.0,
             'max_planning_range': 500.0,
-            'use_hd_map_constraints': False,  # Disabled for basic A* testing
+            'use_hd_map_constraints': LaunchConfiguration('use_hd_map_constraints'),
+            'enforce_traffic_rules': LaunchConfiguration('enforce_traffic_rules'),
+            'lane_following_preference': 0.8,
+            'lane_change_penalty': 10.0,
             'visualize_search_space': LaunchConfiguration('visualize_search_space'),
             
             # A* specific parameters
@@ -86,6 +101,12 @@ def generate_launch_description():
             'ground_filter.pmf_initial_distance': 0.5,
             'ground_filter.pmf_max_distance': 3.0,
             'dynamic_obstacle_max_range': 50.0,
+            
+            # Height filtering parameters for removing tree tops and vegetation
+            'height_filter.enable_max_height_filter': True,  # Enable aggressive height filtering
+            'height_filter.max_height_threshold': 0.5,  # 0.5m above ground - very aggressive filtering
+            'height_filter.enable_vegetation_filter': True,  # Enable vegetation filtering  
+            'height_filter.vegetation_filter_height': 0.5,  # 0.5m - aggressive vegetation filtering
         }],
         remappings=[
             ('/localization/pose_with_covariance', '/localization/pose_with_covariance'),
@@ -112,6 +133,8 @@ def generate_launch_description():
     return LaunchDescription([
         planning_algorithm_arg,
         hd_map_path_arg,
+        use_hd_map_arg,
+        enforce_traffic_rules_arg,
         grid_resolution_arg,
         use_rviz_arg,
         visualize_search_space_arg,

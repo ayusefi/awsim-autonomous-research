@@ -41,6 +41,19 @@ private:
   bool plan_path(const geometry_msgs::msg::PoseStamped & start, 
                  const geometry_msgs::msg::PoseStamped & goal);
   
+  // HD map-aware path planning methods
+  std::vector<geometry_msgs::msg::PoseStamped> plan_path_with_hd_map(
+    const geometry_msgs::msg::PoseStamped& start,
+    const geometry_msgs::msg::PoseStamped& goal,
+    const sensor_msgs::msg::PointCloud2::SharedPtr& planning_cloud);
+  
+  std::vector<geometry_msgs::msg::PoseStamped> validate_path_against_obstacles(
+    const std::vector<geometry_msgs::msg::PoseStamped>& path,
+    const sensor_msgs::msg::PointCloud2::SharedPtr& planning_cloud);
+  
+  std::vector<geometry_msgs::msg::PoseStamped> apply_hd_map_constraints(
+    const std::vector<geometry_msgs::msg::PoseStamped>& path);
+  
   // Callback functions
   void current_pose_callback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
   void goal_pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
@@ -59,6 +72,10 @@ private:
   // Point cloud processing functions - enhanced ground filtering
   sensor_msgs::msg::PointCloud2::SharedPtr filter_ground_points(
     const sensor_msgs::msg::PointCloud2::SharedPtr & pointcloud, bool is_map_data = false);
+  
+  // Height filtering for vegetation and tree tops
+  pcl::PointCloud<pcl::PointXYZ>::Ptr apply_height_filtering(
+    const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud, double ground_level);
   
   // Advanced ground filtering methods
   pcl::PointIndices::Ptr ransac_ground_detection(
@@ -123,6 +140,12 @@ private:
   double ground_filter_angle_threshold_;
   double dynamic_obstacle_max_range_;
   
+  // Height filtering parameters for removing tree tops and vegetation
+  bool enable_max_height_filter_;
+  double max_height_threshold_;  // Maximum height above ground for obstacles (filters tree tops)
+  double vegetation_filter_height_;  // Specific height for filtering vegetation/leaves
+  bool enable_vegetation_filter_;
+  
   // RANSAC ground plane detection parameters
   double ransac_distance_threshold_;
   int ransac_max_iterations_;
@@ -135,6 +158,11 @@ private:
   double pmf_slope_;
   double pmf_initial_distance_;
   double pmf_max_distance_;
+  
+  // HD map integration parameters
+  bool enforce_traffic_rules_;
+  double lane_following_preference_;
+  double lane_change_penalty_;
 };
 
 }  // namespace awsim_path_planner

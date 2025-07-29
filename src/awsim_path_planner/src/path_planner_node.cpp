@@ -9,6 +9,7 @@
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/kdtree/kdtree.h>
+#include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/sample_consensus/method_types.h>
 #include <pcl/sample_consensus/model_types.h>
 #include <pcl/common/common.h>
@@ -79,6 +80,9 @@ void PathPlannerNode::initialize_parameters()
   this->declare_parameter("max_planning_range", 500.0);
   this->declare_parameter("use_hd_map_constraints", true);
   this->declare_parameter("visualize_search_space", true);
+  this->declare_parameter("enforce_traffic_rules", true);
+  this->declare_parameter("lane_following_preference", 0.8);
+  this->declare_parameter("lane_change_penalty", 10.0);
   
   // A* specific parameters
   this->declare_parameter("astar.heuristic_weight", 1.0);
@@ -105,6 +109,12 @@ void PathPlannerNode::initialize_parameters()
   this->declare_parameter("ground_filter.pmf_max_distance", 3.0);
   this->declare_parameter("dynamic_obstacle_max_range", 50.0);
   
+  // Height filtering parameters for removing tree tops and vegetation
+  this->declare_parameter("height_filter.enable_max_height_filter", true);
+  this->declare_parameter("height_filter.max_height_threshold", 6.0);  // 6m above ground - filters very tall tree tops
+  this->declare_parameter("height_filter.enable_vegetation_filter", true);
+  this->declare_parameter("height_filter.vegetation_filter_height", 5.0);  // 5m - typical tall vegetation height
+  
   // Get parameter values
   planning_algorithm_ = this->get_parameter("planning_algorithm").as_string();
   map_frame_ = this->get_parameter("map_frame").as_string();
@@ -115,6 +125,11 @@ void PathPlannerNode::initialize_parameters()
   max_planning_range_ = this->get_parameter("max_planning_range").as_double();
   use_hd_map_constraints_ = this->get_parameter("use_hd_map_constraints").as_bool();
   visualize_search_space_ = this->get_parameter("visualize_search_space").as_bool();
+  
+  // HD map integration parameters
+  enforce_traffic_rules_ = this->get_parameter("enforce_traffic_rules").as_bool();
+  lane_following_preference_ = this->get_parameter("lane_following_preference").as_double();
+  lane_change_penalty_ = this->get_parameter("lane_change_penalty").as_double();
   
   // Get ground filtering parameters - enhanced for advanced filtering
   ground_filter_height_threshold_ = this->get_parameter("ground_filter.height_threshold").as_double();
@@ -129,6 +144,19 @@ void PathPlannerNode::initialize_parameters()
   pmf_initial_distance_ = this->get_parameter("ground_filter.pmf_initial_distance").as_double();
   pmf_max_distance_ = this->get_parameter("ground_filter.pmf_max_distance").as_double();
   dynamic_obstacle_max_range_ = this->get_parameter("dynamic_obstacle_max_range").as_double();
+  
+  // Get height filtering parameters for removing tree tops and vegetation
+  enable_max_height_filter_ = this->get_parameter("height_filter.enable_max_height_filter").as_bool();
+  max_height_threshold_ = this->get_parameter("height_filter.max_height_threshold").as_double();
+  enable_vegetation_filter_ = this->get_parameter("height_filter.enable_vegetation_filter").as_bool();
+  vegetation_filter_height_ = this->get_parameter("height_filter.vegetation_filter_height").as_double();
+  
+  // Debug: Print height filtering parameters
+  RCLCPP_INFO(this->get_logger(), "Height filtering parameters loaded:");
+  RCLCPP_INFO(this->get_logger(), "  enable_max_height_filter: %s", enable_max_height_filter_ ? "true" : "false");
+  RCLCPP_INFO(this->get_logger(), "  max_height_threshold: %.2f", max_height_threshold_);
+  RCLCPP_INFO(this->get_logger(), "  enable_vegetation_filter: %s", enable_vegetation_filter_ ? "true" : "false");
+  RCLCPP_INFO(this->get_logger(), "  vegetation_filter_height: %.2f", vegetation_filter_height_);
 }
 
 void PathPlannerNode::setup_subscribers_and_publishers()
@@ -304,7 +332,12 @@ bool PathPlannerNode::plan_path(const geometry_msgs::msg::PoseStamped & start,
   try {
     // Plan with selected algorithm
     if (planning_algorithm_ == "astar") {
-      planned_path = astar_planner_->plan_path(start, goal, planning_cloud);
+      // Apply HD map constraints to A* planner if available
+      if (use_hd_map_constraints_ && hd_map_manager_->is_map_loaded()) {
+        planned_path = plan_path_with_hd_map(start, goal, planning_cloud);
+      } else {
+        planned_path = astar_planner_->plan_path(start, goal, planning_cloud);
+      }
     } else if (planning_algorithm_ == "rrt_star") {
       planned_path = rrt_star_planner_->plan_path(start, goal, planning_cloud);
     } else {
@@ -312,13 +345,18 @@ bool PathPlannerNode::plan_path(const geometry_msgs::msg::PoseStamped & start,
       return false;
     }
     
-    // Apply HD map constraints if enabled and available
-    if (use_hd_map_constraints_ && hd_map_manager_->is_map_loaded()) {
+    // Apply HD map post-processing if enabled and available
+    if (use_hd_map_constraints_ && hd_map_manager_->is_map_loaded() && !planned_path.empty()) {
       if (hd_map_manager_->is_path_valid(planned_path)) {
         planned_path = hd_map_manager_->optimize_path_to_lanes(planned_path);
         RCLCPP_INFO(this->get_logger(), "Path optimized using HD map constraints");
       } else {
-        RCLCPP_WARN(this->get_logger(), "Planned path violates HD map constraints");
+        if (enforce_traffic_rules_) {
+          RCLCPP_WARN(this->get_logger(), "Planned path violates HD map constraints, rejecting path");
+          return false;
+        } else {
+          RCLCPP_WARN(this->get_logger(), "Planned path violates HD map constraints but proceeding");
+        }
       }
     }
     
@@ -499,6 +537,53 @@ sensor_msgs::msg::PointCloud2::SharedPtr PathPlannerNode::filter_ground_points(
   extract.setNegative(false);  // Extract obstacle points only
   extract.filter(*filtered_cloud);
   
+  // Step 3.5: Apply height filtering to remove tree tops and vegetation
+  if ((enable_max_height_filter_ || enable_vegetation_filter_) && !filtered_cloud->empty()) {
+    RCLCPP_INFO(this->get_logger(), "Height filtering enabled: max_filter=%s (%.1fm), veg_filter=%s (%.1fm)", 
+                enable_max_height_filter_ ? "true" : "false", max_height_threshold_,
+                enable_vegetation_filter_ ? "true" : "false", vegetation_filter_height_);
+    
+    // Calculate ground level from the point cloud
+    std::vector<float> z_values;
+    for (const auto& point : preprocessed_cloud->points) {
+      z_values.push_back(point.z);
+    }
+    std::sort(z_values.begin(), z_values.end());
+    
+    // Use 10th percentile as ground level estimate
+    float ground_level = z_values[std::min((size_t)(z_values.size() * 0.1), z_values.size() - 1)];
+    
+    // Store original size for comparison
+    size_t before_height_filter = filtered_cloud->points.size();
+    
+    RCLCPP_INFO(this->get_logger(), "Before height filtering: %zu points, ground level: %.2f", 
+                before_height_filter, ground_level);
+    
+    // Apply height filtering
+    filtered_cloud = apply_height_filtering(filtered_cloud, ground_level);
+    
+    // Safety check: if height filtering removed more than 95% of points, disable it
+    if (filtered_cloud->points.size() < before_height_filter * 0.05) {
+      RCLCPP_WARN(this->get_logger(), 
+        "Height filtering removed too many points (%zu -> %zu, %.1f%%). Disabling height filtering for this frame.",
+        before_height_filter, filtered_cloud->points.size(),
+        ((double)(before_height_filter - filtered_cloud->points.size()) / before_height_filter) * 100.0);
+      
+      // Re-extract obstacle points without height filtering
+      pcl::ExtractIndices<pcl::PointXYZ> extract_safe;
+      extract_safe.setInputCloud(preprocessed_cloud);
+      extract_safe.setIndices(obstacle_indices);
+      extract_safe.setNegative(false);
+      extract_safe.filter(*filtered_cloud);
+    } else {
+      RCLCPP_INFO(this->get_logger(), "Applied height filtering: %zu -> %zu points (%.1f%% kept)", 
+                  before_height_filter, filtered_cloud->points.size(),
+                  ((double)filtered_cloud->points.size() / before_height_filter) * 100.0);
+    }
+  } else {
+    RCLCPP_INFO(this->get_logger(), "Height filtering disabled or no points to filter");
+  }
+  
   // Step 4: Range filtering for sensor data
   if (!is_map_data) {
     pcl::PointCloud<pcl::PointXYZ>::Ptr range_filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
@@ -562,6 +647,56 @@ pcl::PointCloud<pcl::PointXYZ>::Ptr PathPlannerNode::preprocess_cloud(
   }
   
   return processed_cloud;
+}
+
+pcl::PointCloud<pcl::PointXYZ>::Ptr PathPlannerNode::apply_height_filtering(
+  const pcl::PointCloud<pcl::PointXYZ>::Ptr & cloud, double ground_level)
+{
+  pcl::PointCloud<pcl::PointXYZ>::Ptr height_filtered_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  
+  if (!cloud || cloud->empty()) {
+    return height_filtered_cloud;
+  }
+  
+  size_t original_size = cloud->points.size();
+  size_t max_height_filtered = 0;
+  size_t vegetation_filtered = 0;
+  
+  for (const auto& point : cloud->points) {
+    double height_above_ground = point.z - ground_level;
+    bool keep_point = true;
+    
+    // Apply maximum height filter (removes very high points like tree tops)
+    if (enable_max_height_filter_ && height_above_ground > max_height_threshold_) {
+      keep_point = false;
+      max_height_filtered++;
+    }
+    // Apply vegetation-specific height filter (removes foliage/leaves at typical tree heights)
+    // Note: This is independent of max height filter - if either filter triggers, point is removed
+    else if (enable_vegetation_filter_ && height_above_ground > vegetation_filter_height_) {
+      keep_point = false;
+      vegetation_filtered++;
+    }
+    
+    if (keep_point) {
+      height_filtered_cloud->points.push_back(point);
+    }
+  }
+  
+  // Update point cloud properties
+  height_filtered_cloud->width = height_filtered_cloud->points.size();
+  height_filtered_cloud->height = 1;
+  height_filtered_cloud->is_dense = false;
+  height_filtered_cloud->header = cloud->header;
+  
+  RCLCPP_INFO(this->get_logger(), 
+    "Height filtering: %zu -> %zu points (%.1f%% kept). "
+    "Max height filtered: %zu, Vegetation filtered: %zu. Ground level: %.2fm",
+    original_size, height_filtered_cloud->points.size(),
+    ((double)height_filtered_cloud->points.size() / original_size) * 100.0,
+    max_height_filtered, vegetation_filtered, ground_level);
+  
+  return height_filtered_cloud;
 }
 
 pcl::PointIndices::Ptr PathPlannerNode::ransac_ground_detection(
@@ -815,6 +950,125 @@ void PathPlannerNode::update_occupancy_grid()
       RCLCPP_DEBUG(this->get_logger(), "Grid update completed: %s", e.what());
     }
   }
+}
+
+std::vector<geometry_msgs::msg::PoseStamped> PathPlannerNode::plan_path_with_hd_map(
+  const geometry_msgs::msg::PoseStamped& start,
+  const geometry_msgs::msg::PoseStamped& goal,
+  const sensor_msgs::msg::PointCloud2::SharedPtr& planning_cloud)
+{
+  RCLCPP_INFO(this->get_logger(), "Planning path with HD map constraints");
+  
+  // Step 1: Get lane-following path suggestion from HD map
+  auto lane_following_path = hd_map_manager_->get_lane_following_path(start, goal);
+  
+  if (lane_following_path.empty()) {
+    RCLCPP_WARN(this->get_logger(), "No lane-following path found, falling back to standard A*");
+    return astar_planner_->plan_path(start, goal, planning_cloud);
+  }
+  
+  // Step 2: Validate lane-following path against obstacles
+  auto validated_path = validate_path_against_obstacles(lane_following_path, planning_cloud);
+  
+  if (!validated_path.empty()) {
+    RCLCPP_INFO(this->get_logger(), "Using lane-following path (%zu waypoints)", validated_path.size());
+    return validated_path;
+  }
+  
+  // Step 3: If lane-following path is blocked, try hybrid approach
+  RCLCPP_INFO(this->get_logger(), "Lane-following path blocked, using hybrid approach");
+  
+  // Use A* with HD map cost modifiers
+  auto astar_path = astar_planner_->plan_path(start, goal, planning_cloud);
+  
+  if (astar_path.empty()) {
+    return astar_path;
+  }
+  
+  // Step 4: Apply HD map constraints to A* result
+  return apply_hd_map_constraints(astar_path);
+}
+
+std::vector<geometry_msgs::msg::PoseStamped> PathPlannerNode::validate_path_against_obstacles(
+  const std::vector<geometry_msgs::msg::PoseStamped>& path,
+  const sensor_msgs::msg::PointCloud2::SharedPtr& planning_cloud)
+{
+  if (path.empty() || !planning_cloud) {
+    return {};
+  }
+  
+  // Convert point cloud to PCL for processing
+  pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud(new pcl::PointCloud<pcl::PointXYZ>);
+  pcl::fromROSMsg(*planning_cloud, *pcl_cloud);
+  
+  // Build obstacle KD-tree for fast queries
+  pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+  kdtree.setInputCloud(pcl_cloud);
+  
+  // Check each waypoint along the path
+  double vehicle_radius = 2.0;  // Vehicle safety radius in meters
+  std::vector<geometry_msgs::msg::PoseStamped> validated_path;
+  
+  for (const auto& waypoint : path) {
+    pcl::PointXYZ search_point;
+    search_point.x = waypoint.pose.position.x;
+    search_point.y = waypoint.pose.position.y;
+    search_point.z = waypoint.pose.position.z;
+    
+    // Search for nearby obstacles
+    std::vector<int> point_indices;
+    std::vector<float> point_distances;
+    
+    if (kdtree.radiusSearch(search_point, vehicle_radius, point_indices, point_distances) > 0) {
+      // Obstacle detected, path is blocked
+      RCLCPP_DEBUG(this->get_logger(), "Lane-following path blocked at waypoint (%f, %f)", 
+                   waypoint.pose.position.x, waypoint.pose.position.y);
+      break;
+    } else {
+      validated_path.push_back(waypoint);
+    }
+  }
+  
+  // Path is valid if we processed all waypoints
+  if (validated_path.size() == path.size()) {
+    return validated_path;
+  } else {
+    return {};  // Path is blocked
+  }
+}
+
+std::vector<geometry_msgs::msg::PoseStamped> PathPlannerNode::apply_hd_map_constraints(
+  const std::vector<geometry_msgs::msg::PoseStamped>& path)
+{
+  if (path.empty()) {
+    return path;
+  }
+  
+  std::vector<geometry_msgs::msg::PoseStamped> constrained_path;
+  
+  for (const auto& waypoint : path) {
+    // Check if waypoint is in driveable area
+    if (!hd_map_manager_->is_point_driveable(waypoint.pose.position.x, waypoint.pose.position.y)) {
+      if (enforce_traffic_rules_) {
+        // Skip non-driveable waypoints if enforcing rules
+        RCLCPP_DEBUG(this->get_logger(), "Skipping non-driveable waypoint at (%f, %f)",
+                     waypoint.pose.position.x, waypoint.pose.position.y);
+        continue;
+      }
+    }
+    
+    // Check speed limits and adjust if necessary
+    double speed_limit = hd_map_manager_->get_speed_limit_at_point(
+      waypoint.pose.position.x, waypoint.pose.position.y);
+    
+    auto modified_waypoint = waypoint;
+    // Note: Speed information would be stored in a custom message or twist field
+    // For now, we just validate the position
+    
+    constrained_path.push_back(modified_waypoint);
+  }
+  
+  return constrained_path;
 }
 
 }  // namespace awsim_path_planner
