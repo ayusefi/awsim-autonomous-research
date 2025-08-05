@@ -9,8 +9,9 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     # Package directories
-    bringup_pkg_dir = FindPackageShare('awsim_bringup')
-    slam_pkg_dir = FindPackageShare('awsim_slam')
+    localization_pkg_dir = FindPackageShare('awsim_localization')
+    route_planning_pkg_dir = FindPackageShare('awsim_path_planner')
+    trajectory_planning_pkg_dir = FindPackageShare('awsim_trajectory_planner')
     
     # Launch arguments
     use_sim_time_arg = DeclareLaunchArgument(
@@ -19,50 +20,39 @@ def generate_launch_description():
         description='Use simulation time'
     )
     
-    enable_slam_arg = DeclareLaunchArgument(
-        'enable_slam',
-        default_value='true',
-        description='Enable SLAM functionality'
-    )
-    
-    enable_sensor_logger_arg = DeclareLaunchArgument(
-        'enable_sensor_logger',
-        default_value='false',
-        description='Enable sensor data logging'
-    )
-    
-    # Include sensor logger launch file (conditionally)
-    sensor_logger_launch = IncludeLaunchDescription(
+    localization_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            PathJoinSubstitution([bringup_pkg_dir, 'launch', 'sensor_logger.launch.py'])
-        ]),
-        launch_arguments={
-            'use_sim_time': LaunchConfiguration('use_sim_time'),
-        }.items(),
-        condition=LaunchConfiguration('enable_sensor_logger')
+            PathJoinSubstitution([localization_pkg_dir, 'launch', 'awsim_localization.launch.py'])
+        ])
     )
     
-    # Include SLAM launch file (conditionally)
-    slam_launch = IncludeLaunchDescription(
+    path_planner_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
-            PathJoinSubstitution([slam_pkg_dir, 'launch', 'slam.launch.py'])
-        ]),
-        launch_arguments={
-            'use_sim_time': LaunchConfiguration('use_sim_time'),
-        }.items(),
-        condition=LaunchConfiguration('enable_slam')
+            PathJoinSubstitution([route_planning_pkg_dir, 'launch', 'path_planner.launch.py'])
+        ])
     )
-    
-    # Delay SLAM launch to ensure other nodes are ready
-    delayed_slam_launch = TimerAction(
+
+    trajectory_planner_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([trajectory_planning_pkg_dir, 'launch', 'trajectory_planner.launch.py'])
+        ])
+    )
+
+    # Delay path planner launch to ensure other nodes are ready
+    delayed_path_planner_launch = TimerAction(
         period=2.0,
-        actions=[slam_launch]
+        actions=[path_planner_launch]
+    )
+
+    # Delay trajectory planner launch to ensure path planner is ready
+    delayed_trajectory_planner_launch = TimerAction(
+        period=4.0,
+        actions=[trajectory_planner_launch]
     )
     
     return LaunchDescription([
         use_sim_time_arg,
-        enable_slam_arg,
-        enable_sensor_logger_arg,
-        sensor_logger_launch,
-        delayed_slam_launch,
+        localization_launch,
+        delayed_path_planner_launch,
+        # delayed_trajectory_planner_launch,
     ])
