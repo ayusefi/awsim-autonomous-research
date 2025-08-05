@@ -114,6 +114,18 @@ Visualization Manager:
       Displays:
         - Class: rviz_default_plugins/MarkerArray
           Enabled: true
+          Name: Lanelet Centerlines
+          Namespaces:
+            combined_centerlines: true
+          Topic:
+            Depth: 5
+            Durability Policy: Volatile
+            History Policy: Keep Last
+            Reliability Policy: Reliable
+            Value: /lanelet_visualization
+          Value: true
+        - Class: rviz_default_plugins/MarkerArray
+          Enabled: true
           Name: HD Map Visualization
           Namespaces:
             {}

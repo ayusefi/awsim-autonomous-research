@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.8)
 project(awsim_path_planner)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+  add_compile_options(-Wall -Wextra -Wno-pedantic)
 endif()
 
 # Set C++ standard
@@ -24,6 +24,12 @@ find_package(visualization_msgs REQUIRED)
 find_package(pcl_ros REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(PCL REQUIRED)
+find_package(lanelet2_core REQUIRED)
+find_package(lanelet2_io REQUIRED)
+find_package(lanelet2_projection REQUIRED)
+find_package(lanelet2_routing REQUIRED)
+find_package(lanelet2_traffic_rules REQUIRED)
+find_package(autoware_planning_msgs REQUIRED)
 
 # Include directories
 include_directories(include)
@@ -43,6 +49,12 @@ set(dependencies
   visualization_msgs
   pcl_ros
   pcl_conversions
+  lanelet2_core
+  lanelet2_io
+  lanelet2_projection
+  lanelet2_routing
+  lanelet2_traffic_rules
+  autoware_planning_msgs
 )
 
 # Path Planner Node Library
@@ -50,7 +62,7 @@ add_library(${PROJECT_NAME}_lib SHARED
   src/path_planner_node.cpp
   src/astar_planner.cpp
   src/rrt_star_planner.cpp
-  src/hd_map_manager.cpp
+  src/route_planner.cpp
 )
 
 target_link_libraries(${PROJECT_NAME}_lib ${PCL_LIBRARIES})

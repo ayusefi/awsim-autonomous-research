@@ -133,12 +133,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'manual_map_center_x', 
-            default_value='81237.62',
+            default_value='0.0',
             description='Manual map center X coordinate (Shinjuku map default)'
         ),
         DeclareLaunchArgument(
             'manual_map_center_y', 
-            default_value='49905.12',
+            default_value='0.0',
             description='Manual map center Y coordinate (Shinjuku map default)'
         ),
         DeclareLaunchArgument(

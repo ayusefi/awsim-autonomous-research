@@ -8,6 +8,7 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
+#include <autoware_planning_msgs/msg/path.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
@@ -23,7 +24,7 @@
 
 #include "awsim_path_planner/astar_planner.hpp"
 #include "awsim_path_planner/rrt_star_planner.hpp"
-#include "awsim_path_planner/hd_map_manager.hpp"
+#include "awsim_path_planner/route_planner.hpp"
 
 namespace awsim_path_planner
 {
@@ -41,18 +42,14 @@ private:
   bool plan_path(const geometry_msgs::msg::PoseStamped & start, 
                  const geometry_msgs::msg::PoseStamped & goal);
   
-  // HD map-aware path planning methods
-  std::vector<geometry_msgs::msg::PoseStamped> plan_path_with_hd_map(
+  // Route planning methods using lanelet2
+  std::vector<geometry_msgs::msg::PoseStamped> plan_route_to_centerline(
     const geometry_msgs::msg::PoseStamped& start,
-    const geometry_msgs::msg::PoseStamped& goal,
-    const sensor_msgs::msg::PointCloud2::SharedPtr& planning_cloud);
+    const geometry_msgs::msg::PoseStamped& goal);
   
-  std::vector<geometry_msgs::msg::PoseStamped> validate_path_against_obstacles(
-    const std::vector<geometry_msgs::msg::PoseStamped>& path,
-    const sensor_msgs::msg::PointCloud2::SharedPtr& planning_cloud);
-  
-  std::vector<geometry_msgs::msg::PoseStamped> apply_hd_map_constraints(
-    const std::vector<geometry_msgs::msg::PoseStamped>& path);
+  // Convert Autoware path to nav_msgs path
+  nav_msgs::msg::Path convert_autoware_path_to_nav_path(
+    const autoware_planning_msgs::msg::Path& autoware_path);
   
   // Callback functions
   void current_pose_callback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
@@ -98,6 +95,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr raw_pointcloud_sub_;
   
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+  rclcpp::Publisher<autoware_planning_msgs::msg::Path>::SharedPtr autoware_path_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr grid_pub_;
   
@@ -111,7 +109,10 @@ private:
   // Planning components
   std::unique_ptr<AStarPlanner> astar_planner_;
   std::unique_ptr<RRTStarPlanner> rrt_star_planner_;
-  std::unique_ptr<HDMapManager> hd_map_manager_;
+  std::unique_ptr<RoutePlanner> route_planner_;
+  
+  // Active planner identifier
+  std::string active_planner_;
   
   // State variables
   geometry_msgs::msg::PoseStamped current_pose_;
@@ -125,15 +126,22 @@ private:
   bool has_raw_pointcloud_;
   
   // Parameters
-  std::string planning_algorithm_;  // "astar" or "rrt_star"
+  std::string planning_algorithm_;  // "astar", "rrt_star", or "route"
   std::string map_frame_;
   std::string base_link_frame_;
-  std::string hd_map_path_;
+  std::string lanelet_map_path_;
   double grid_resolution_;
   double planning_timeout_;
   double max_planning_range_;
-  bool use_hd_map_constraints_;
+  bool use_route_planning_;
   bool visualize_search_space_;
+  
+  // Route planning parameters
+  std::string traffic_rules_name_;
+  std::string participant_name_;
+  double goal_search_radius_;
+  double centerline_resolution_;
+  bool enable_lane_change_;
   
   // Ground filtering parameters - enhanced for advanced filtering
   double ground_filter_height_threshold_;
@@ -158,11 +166,6 @@ private:
   double pmf_slope_;
   double pmf_initial_distance_;
   double pmf_max_distance_;
-  
-  // HD map integration parameters
-  bool enforce_traffic_rules_;
-  double lane_following_preference_;
-  double lane_change_penalty_;
 };
 
 }  // namespace awsim_path_planner

@@ -4,11 +4,12 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <memory>
-
-namespace awsim_path_planner {
-  class HDMapManager;
-  struct LaneInfo;
-}
+#include <unordered_map>
+#include <lanelet2_core/LaneletMap.h>
+#include <lanelet2_io/Io.h>
+#include <lanelet2_io/Projection.h>
+#include <lanelet2_projection/UTM.h>
+#include <lanelet2_projection/LocalCartesian.h>
 
 class LaneletVisualizerNode : public rclcpp::Node
 {
@@ -18,9 +19,10 @@ public:
 private:
   void publish_visualization();
   void publish_comprehensive_visualization();
-  std::vector<const awsim_path_planner::LaneInfo*> select_lanes_for_visualization() const;
+  std::vector<lanelet::ConstLanelet> select_lanelets_for_visualization() const;
   
-  std::unique_ptr<awsim_path_planner::HDMapManager> hd_map_manager_;
+  lanelet::LaneletMapPtr lanelet_map_;
+  std::unique_ptr<lanelet::projection::UtmProjector> projector_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
   
@@ -39,4 +41,15 @@ private:
   bool show_crosswalks_;
   bool show_road_markings_;
   bool show_regulatory_elements_;
+  
+  // Coordinate transformation variables
+  double map_origin_offset_x_;
+  double map_origin_offset_y_;
+  
+  // Optimization: local coordinate lookup map
+  std::unordered_map<int64_t, std::pair<double, double>> local_coord_cache_;
+  
+  // Coordinate transformation offset (calculated from local_x/local_y vs projected coordinates)
+  double local_to_global_offset_x_;
+  double local_to_global_offset_y_;
 };

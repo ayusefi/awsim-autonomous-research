@@ -4,7 +4,12 @@
 #include <visualization_msgs/msg/marker.hpp>
 #include <geometry_msgs/msg/point.hpp>
 #include <std_msgs/msg/color_rgba.hpp>
-#include "awsim_path_planner/hd_map_manager.hpp"
+#include <lanelet2_core/LaneletMap.h>
+#include <lanelet2_io/Io.h>
+#include <lanelet2_projection/UTM.h>
+#include <lanelet2_projection/LocalCartesian.h>
+#include <lanelet2_traffic_rules/TrafficRulesFactory.h>
+#include <lanelet2_core/utility/Utilities.h>
 
 LaneletVisualizerNode::LaneletVisualizerNode() : Node("lanelet_visualizer_node")
 {
@@ -19,7 +24,7 @@ LaneletVisualizerNode::LaneletVisualizerNode() : Node("lanelet_visualizer_node")
   this->declare_parameter<bool>("show_speed_limits", false); // Disabled by default
   this->declare_parameter<double>("max_visualization_distance", 200.0); // Only show nearby lanes
   this->declare_parameter<bool>("use_combined_markers", true); // Combine multiple lanes into single markers
-  this->declare_parameter<int>("max_lanes_to_visualize", 50); // Hard limit on number of lanes
+  this->declare_parameter<int>("max_lanes_to_visualize", 100000); // Hard limit on number of lanes
   
   // Declare additional feature parameters
   this->declare_parameter<bool>("show_traffic_lights", false);
@@ -47,35 +52,151 @@ LaneletVisualizerNode::LaneletVisualizerNode() : Node("lanelet_visualizer_node")
   show_road_markings_ = this->get_parameter("show_road_markings").as_bool();
   show_regulatory_elements_ = this->get_parameter("show_regulatory_elements").as_bool();
   
-  // Initialize HD map manager
-  hd_map_manager_ = std::make_unique<awsim_path_planner::HDMapManager>(this);
+  // Use UTM projector with map origin for standard approach
+  // Based on the OSM file coordinates: lat=35.688, lon=139.691 (Tokyo area)
+  // This matches the coordinate system used by the localization system
+  lanelet::Origin origin({35.688552, 139.691427}); // Map origin from OSM file
+  projector_ = std::make_unique<lanelet::projection::UtmProjector>(origin);
   
-  // Load the map
-  if (!hd_map_manager_->load_map(hd_map_path)) {
-    RCLCPP_ERROR(this->get_logger(), "Failed to load HD map from: %s", hd_map_path.c_str());
-    return;
-  }
-  
-  RCLCPP_INFO(this->get_logger(), "Successfully loaded HD map with %zu lanes", 
-              hd_map_manager_->get_lanes().size());
-  
-  // Create publishers
+  // Create publishers first (always create them, even if map loading fails)
   marker_publisher_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
     "/lanelet_visualization", 10);
   
-  // Create timer for periodic visualization updates
+  // Load the lanelet2 map using robust method
+  bool map_loaded = false;
+  try {
+    RCLCPP_INFO(this->get_logger(), "Loading lanelet2 map from: %s", hd_map_path.c_str());
+    
+    // Initialize lanelet map
+    lanelet_map_ = std::make_shared<lanelet::LaneletMap>();
+    
+    // Use error-tolerant loading directly
+    lanelet::ErrorMessages errors;
+    lanelet_map_ = lanelet::load(hd_map_path, *projector_, &errors);
+    
+    if (!errors.empty()) {
+      RCLCPP_INFO(this->get_logger(), "Map loaded with %zu parsing warnings (regulatory elements with issues gracefully handled)", errors.size());
+      for (size_t i = 0; i < std::min(errors.size(), size_t(5)); ++i) {
+        RCLCPP_DEBUG(this->get_logger(), "Warning %zu: %s", i+1, errors[i].c_str());
+      }
+      if (errors.size() > 5) {
+        RCLCPP_DEBUG(this->get_logger(), "... and %zu more warnings", errors.size() - 5);
+      }
+    }
+    
+    // Validate the map loaded correctly
+    if (!lanelet_map_ || lanelet_map_->laneletLayer.empty()) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to load any lanelets from map file");
+      map_loaded = false;
+    } else {
+      // Validate with standard approach: check lanelet types
+      
+      lanelet::ConstLanelets all_lanelets;
+      for (const auto& lanelet : lanelet_map_->laneletLayer) {
+        all_lanelets.push_back(lanelet);
+      }
+
+      lanelet::ConstLanelets road_lanelets;
+      for (const auto& lanelet : all_lanelets) {
+        if (lanelet.attributeOr("subtype", std::string()) == "road") {
+          road_lanelets.push_back(lanelet);
+        }
+      }
+
+      RCLCPP_INFO(this->get_logger(), "Successfully loaded lanelet2 map with %zu total lanelets (%zu road lanelets)", 
+                  all_lanelets.size(), road_lanelets.size());
+      
+      // Use the standard approach: read local_x/local_y attributes from OSM
+      // The localization system uses manual_map_center = (0.0, 0.0) which means
+      // it publishes poses in global coordinates (same as local_x/local_y in OSM)
+      // Therefore, we use the local_x/local_y coordinates directly from OSM attributes
+      map_origin_offset_x_ = 0.0;
+      map_origin_offset_y_ = 0.0;
+      
+      RCLCPP_INFO(this->get_logger(), 
+                  "Using standard approach: reading local_x/local_y attributes from OSM");
+      
+      // Debug: Check if some nodes have local_x/local_y attributes AND check if lanelets have them
+      int nodes_with_local_coords = 0;
+      int lanelets_with_local_coords = 0;
+      double first_local_x = 0.0, first_local_y = 0.0;
+      double first_projected_x = 0.0, first_projected_y = 0.0;
+      bool offset_calculated = false;
+      
+      for (const auto& point : lanelet_map_->pointLayer) {
+        if (point.hasAttribute("local_x") && point.hasAttribute("local_y")) {
+          nodes_with_local_coords++;
+          // Build the local coordinate cache for efficient lookup
+          double local_x = std::stod(point.attribute("local_x").value());
+          double local_y = std::stod(point.attribute("local_y").value());
+          local_coord_cache_[point.id()] = std::make_pair(local_x, local_y);
+          
+          // Calculate offset from first point
+          if (!offset_calculated) {
+            first_local_x = local_x;
+            first_local_y = local_y;
+            first_projected_x = point.x();
+            first_projected_y = point.y();
+            local_to_global_offset_x_ = first_local_x - first_projected_x;
+            local_to_global_offset_y_ = first_local_y - first_projected_y;
+            offset_calculated = true;
+            
+            RCLCPP_INFO(this->get_logger(), 
+                       "Calculated global offset: X=%.2f, Y=%.2f (local: %.2f,%.2f - projected: %.2f,%.2f)", 
+                       local_to_global_offset_x_, local_to_global_offset_y_,
+                       first_local_x, first_local_y, first_projected_x, first_projected_y);
+          }
+          
+          if (nodes_with_local_coords <= 3) { // Log first few for debugging
+            RCLCPP_INFO(this->get_logger(), 
+                       "Point ID %ld: local_x=%.2f, local_y=%.2f", 
+                       point.id(), local_x, local_y);
+          }
+        }
+      }
+      
+      // Also check if lanelets have local_x/local_y attributes (alternative approach)
+      for (const auto& lanelet : all_lanelets) {
+        if (lanelet.hasAttribute("local_x") && lanelet.hasAttribute("local_y")) {
+          lanelets_with_local_coords++;
+          if (lanelets_with_local_coords <= 3) {
+            RCLCPP_INFO(this->get_logger(), 
+                       "Lanelet ID %ld: local_x=%s, local_y=%s", 
+                       lanelet.id(), 
+                       lanelet.attribute("local_x").value().c_str(),
+                       lanelet.attribute("local_y").value().c_str());
+          }
+        }
+      }
+      
+      RCLCPP_INFO(this->get_logger(), 
+                  "Found %d points and %d lanelets with local_x/local_y attributes, cached for efficient lookup", 
+                  nodes_with_local_coords, lanelets_with_local_coords);
+      
+      map_loaded = true;
+    }
+    
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(this->get_logger(), "Failed to load lanelet2 map from: %s. Error: %s", 
+                 hd_map_path.c_str(), e.what());
+    RCLCPP_WARN(this->get_logger(), "Map loading failed, but node will continue running. No visualization will be published.");
+    map_loaded = false;
+  }
+  
+  // Create timer for periodic visualization updates (always create it)
   auto timer_period = std::chrono::duration<double>(1.0 / update_rate);
   timer_ = this->create_wall_timer(timer_period, 
     std::bind(&LaneletVisualizerNode::publish_visualization, this));
   
-  RCLCPP_INFO(this->get_logger(), "Lanelet visualizer node initialized successfully");
+  RCLCPP_INFO(this->get_logger(), "Lanelet visualizer node initialized successfully (map loaded: %s)", 
+              map_loaded ? "true" : "false");
   RCLCPP_INFO(this->get_logger(), "Publishing visualization markers to /lanelet_visualization");
   RCLCPP_INFO(this->get_logger(), "Map frame: %s", map_frame_.c_str());
 }
 
 void LaneletVisualizerNode::publish_visualization()
 {
-  if (!hd_map_manager_->is_map_loaded()) {
+  if (!lanelet_map_ || lanelet_map_->laneletLayer.empty()) {
     return;
   }
 
@@ -96,15 +217,13 @@ void LaneletVisualizerNode::publish_comprehensive_visualization()
   marker_array.markers.push_back(clear_marker);
   
   // Select a subset of lanes for visualization
-  auto selected_lanes = select_lanes_for_visualization();
+  auto selected_lanelets = select_lanelets_for_visualization();
   
-  RCLCPP_DEBUG(this->get_logger(), "Visualizing %zu lanes out of %zu total", 
-               selected_lanes.size(), hd_map_manager_->get_lanes().size());
+  RCLCPP_DEBUG(this->get_logger(), "Visualizing %zu lanelets out of %zu total", 
+               selected_lanelets.size(), lanelet_map_->laneletLayer.size());
   
-  // Create combined markers for better performance
-  
-  // 1. Combined centerlines marker
-  if (show_centerlines_ && !selected_lanes.empty()) {
+  // Create combined centerlines marker
+  if (show_centerlines_ && !selected_lanelets.empty()) {
     visualization_msgs::msg::Marker centerlines_marker;
     centerlines_marker.header.frame_id = map_frame_;
     centerlines_marker.header.stamp = this->now();
@@ -120,17 +239,39 @@ void LaneletVisualizerNode::publish_comprehensive_visualization()
     centerlines_marker.color.a = 0.8;
     
     // Add all centerlines as line segments
-    for (const auto* lane : selected_lanes) {
-      if (lane->centerline.size() < 2) continue;
+    for (const auto& lanelet : selected_lanelets) {
+      auto centerline = lanelet.centerline();
+      if (centerline.size() < 2) continue;
       
-      for (size_t i = 0; i < lane->centerline.size() - 1; ++i) {
+      for (size_t i = 0; i < centerline.size() - 1; ++i) {
         geometry_msgs::msg::Point p1, p2;
-        p1.x = lane->centerline[i].first;
-        p1.y = lane->centerline[i].second;
-        p1.z = 0.1;
         
-        p2.x = lane->centerline[i + 1].first;
-        p2.y = lane->centerline[i + 1].second;
+        // Standard approach: Try cached coordinates first, then apply global offset
+        const auto& point1 = centerline[i];
+        const auto& point2 = centerline[i + 1];
+        
+        // Use cached local coordinates if available
+        auto it1 = local_coord_cache_.find(point1.id());
+        if (it1 != local_coord_cache_.end()) {
+          p1.x = it1->second.first;  // local_x from OSM
+          p1.y = it1->second.second; // local_y from OSM
+        } else {
+          // Transform projected coordinates to global coordinates using calculated offset
+          p1.x = point1.x() + local_to_global_offset_x_;
+          p1.y = point1.y() + local_to_global_offset_y_;
+        }
+        
+        auto it2 = local_coord_cache_.find(point2.id());
+        if (it2 != local_coord_cache_.end()) {
+          p2.x = it2->second.first;  // local_x from OSM
+          p2.y = it2->second.second; // local_y from OSM
+        } else {
+          // Transform projected coordinates to global coordinates using calculated offset
+          p2.x = point2.x() + local_to_global_offset_x_;
+          p2.y = point2.y() + local_to_global_offset_y_;
+        }
+        
+        p1.z = 0.1;
         p2.z = 0.1;
         
         centerlines_marker.points.push_back(p1);
@@ -142,415 +283,65 @@ void LaneletVisualizerNode::publish_comprehensive_visualization()
       marker_array.markers.push_back(centerlines_marker);
       RCLCPP_INFO_ONCE(this->get_logger(), "Added centerlines marker with %zu points", 
                        centerlines_marker.points.size());
-    }
-  }
-  
-  // 2. Combined boundaries marker (simplified)
-  if (show_boundaries_ && !selected_lanes.empty()) {
-    visualization_msgs::msg::Marker boundaries_marker;
-    boundaries_marker.header.frame_id = map_frame_;
-    boundaries_marker.header.stamp = this->now();
-    boundaries_marker.ns = "combined_boundaries";
-    boundaries_marker.id = 2;
-    boundaries_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
-    boundaries_marker.action = visualization_msgs::msg::Marker::ADD;
-    
-    boundaries_marker.scale.x = 0.2;
-    boundaries_marker.color.r = 1.0;
-    boundaries_marker.color.g = 1.0;
-    boundaries_marker.color.b = 0.0;
-    boundaries_marker.color.a = 0.5;
-    
-    const double lane_width = 3.5;
-    const double half_width = lane_width / 2.0;
-    
-    // Only add boundaries for a subset of lanes to reduce load
-    int boundary_count = 0;
-    const int max_boundary_lanes = std::min(20, static_cast<int>(selected_lanes.size()));
-    
-    for (const auto* lane : selected_lanes) {
-      if (boundary_count >= max_boundary_lanes) break;
-      if (lane->centerline.size() < 2) continue;
       
-      // Simplify - only add boundary points every few centerline points
-      for (size_t i = 0; i < lane->centerline.size() - 1; i += 3) { // Skip points for performance
-        double x = lane->centerline[i].first;
-        double y = lane->centerline[i].second;
-        double x2 = lane->centerline[i + 1].first;
-        double y2 = lane->centerline[i + 1].second;
-        
-        double dx = x2 - x;
-        double dy = y2 - y;
-        double length = std::sqrt(dx * dx + dy * dy);
-        
-        if (length > 0.001) {
-          dx /= length;
-          dy /= length;
-          
-          double perp_x = -dy;
-          double perp_y = dx;
-          
-          // Left boundary segment
-          geometry_msgs::msg::Point left1, left2;
-          left1.x = x + perp_x * half_width;
-          left1.y = y + perp_y * half_width;
-          left1.z = 0.05;
-          left2.x = x2 + perp_x * half_width;
-          left2.y = y2 + perp_y * half_width;
-          left2.z = 0.05;
-          
-          boundaries_marker.points.push_back(left1);
-          boundaries_marker.points.push_back(left2);
-          
-          // Right boundary segment  
-          geometry_msgs::msg::Point right1, right2;
-          right1.x = x - perp_x * half_width;
-          right1.y = y - perp_y * half_width;
-          right1.z = 0.05;
-          right2.x = x2 - perp_x * half_width;
-          right2.y = y2 - perp_y * half_width;
-          right2.z = 0.05;
-          
-          boundaries_marker.points.push_back(right1);
-          boundaries_marker.points.push_back(right2);
+      // Debug: log first few coordinate values to verify they're in the right range
+      if (centerlines_marker.points.size() >= 2) {
+        RCLCPP_INFO_ONCE(this->get_logger(), 
+                         "Sample coordinates: P1(%.2f, %.2f), P2(%.2f, %.2f)", 
+                         centerlines_marker.points[0].x, centerlines_marker.points[0].y,
+                         centerlines_marker.points[1].x, centerlines_marker.points[1].y);
+      }
+      
+      // Debug: Check if local coordinates are being used correctly
+      if (!selected_lanelets.empty()) {
+        auto first_centerline = selected_lanelets[0].centerline();
+        if (first_centerline.size() > 0) {
+          const auto& first_point = first_centerline[0];
+          auto cache_lookup = local_coord_cache_.find(first_point.id());
+          if (cache_lookup != local_coord_cache_.end()) {
+            RCLCPP_INFO_ONCE(this->get_logger(), 
+                           "Cache HIT: Point ID %ld has local coords (%.2f, %.2f)", 
+                           first_point.id(), cache_lookup->second.first, cache_lookup->second.second);
+          } else {
+            double transformed_x = first_point.x() + local_to_global_offset_x_;
+            double transformed_y = first_point.y() + local_to_global_offset_y_;
+            RCLCPP_INFO_ONCE(this->get_logger(), 
+                           "Cache MISS: Point ID %ld transformed (%.2f, %.2f) from projected (%.2f, %.2f) + offset (%.2f, %.2f)", 
+                           first_point.id(), transformed_x, transformed_y,
+                           first_point.x(), first_point.y(),
+                           local_to_global_offset_x_, local_to_global_offset_y_);
+          }
         }
       }
-      boundary_count++;
     }
-    
-    if (!boundaries_marker.points.empty()) {
-      marker_array.markers.push_back(boundaries_marker);
-      RCLCPP_INFO_ONCE(this->get_logger(), "Added boundaries marker with %zu points for %d lanes", 
-                       boundaries_marker.points.size(), boundary_count);
-    }
-  }
-  
-  // 3. Lane IDs - show more when combined markers are disabled
-  if (show_lane_ids_ && !selected_lanes.empty()) {
-    int text_count = 0;
-    const int max_text_markers = use_combined_markers_ ? 
-        std::min(20, static_cast<int>(selected_lanes.size())) : 
-        std::min(50, static_cast<int>(selected_lanes.size()));
-    
-    for (const auto* lane : selected_lanes) {
-      if (text_count >= max_text_markers) break;
-      if (lane->centerline.empty()) continue;
-      
-      visualization_msgs::msg::Marker text_marker;
-      text_marker.header.frame_id = map_frame_;
-      text_marker.header.stamp = this->now();
-      text_marker.ns = "lane_ids";
-      text_marker.id = 10 + text_count;
-      text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-      text_marker.action = visualization_msgs::msg::Marker::ADD;
-      
-      size_t mid_idx = lane->centerline.size() / 2;
-      text_marker.pose.position.x = lane->centerline[mid_idx].first;
-      text_marker.pose.position.y = lane->centerline[mid_idx].second;
-      text_marker.pose.position.z = 2.0;
-      text_marker.pose.orientation.w = 1.0;
-      
-      text_marker.scale.z = 1.5; // Text size
-      text_marker.color.r = 1.0;
-      text_marker.color.g = 1.0;
-      text_marker.color.b = 0.0; // Yellow text
-      text_marker.color.a = 1.0;
-      
-      text_marker.text = "Lane " + std::to_string(lane->id);
-      
-      marker_array.markers.push_back(text_marker);
-      text_count++;
-    }
-    
-    RCLCPP_INFO_ONCE(this->get_logger(), "Added %d lane ID markers", text_count);
-  }
-  
-  // 3b. Speed limits - show at different positions than lane IDs
-  if (show_speed_limits_ && !selected_lanes.empty()) {
-    int text_count = 0;
-    const int max_speed_markers = use_combined_markers_ ? 
-        std::min(15, static_cast<int>(selected_lanes.size())) : 
-        std::min(30, static_cast<int>(selected_lanes.size()));
-    
-    for (const auto* lane : selected_lanes) {
-      if (text_count >= max_speed_markers) break;
-      if (lane->centerline.empty()) continue;
-      
-      visualization_msgs::msg::Marker speed_marker;
-      speed_marker.header.frame_id = map_frame_;
-      speed_marker.header.stamp = this->now();
-      speed_marker.ns = "speed_limits";
-      speed_marker.id = 500 + text_count;
-      speed_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-      speed_marker.action = visualization_msgs::msg::Marker::ADD;
-      
-      // Position at 3/4 along the lane to avoid collision with lane IDs
-      size_t pos_idx = std::min(lane->centerline.size() - 1, 
-                               static_cast<size_t>(lane->centerline.size() * 0.75));
-      speed_marker.pose.position.x = lane->centerline[pos_idx].first;
-      speed_marker.pose.position.y = lane->centerline[pos_idx].second;
-      speed_marker.pose.position.z = 1.0; // Lower than lane IDs
-      speed_marker.pose.orientation.w = 1.0;
-      
-      speed_marker.scale.z = 1.2; // Slightly smaller text
-      speed_marker.color.r = 0.0;
-      speed_marker.color.g = 1.0;
-      speed_marker.color.b = 1.0; // Cyan text
-      speed_marker.color.a = 0.9;
-      
-      speed_marker.text = std::to_string(static_cast<int>(lane->traffic_rule.speed_limit * 3.6)) + " km/h";
-      
-      marker_array.markers.push_back(speed_marker);
-      text_count++;
-    }
-    
-    RCLCPP_INFO_ONCE(this->get_logger(), "Added %d speed limit markers", text_count);
-  }
-  
-  // 4. Add traffic lights
-  if (show_traffic_lights_) {
-    int marker_id = 1000; // Start with high ID to avoid conflicts
-    const auto& traffic_lights = hd_map_manager_->get_traffic_lights();
-    int valid_lights = 0;
-    
-    for (const auto& traffic_light : traffic_lights) {
-      // Skip lights with invalid coordinates
-      if (std::abs(traffic_light.x) > 2000 || std::abs(traffic_light.y) > 2000) {
-        continue;
-      }
-      
-      visualization_msgs::msg::Marker light_marker;
-      light_marker.header.frame_id = map_frame_;
-      light_marker.header.stamp = this->now();
-      light_marker.ns = "traffic_lights";
-      light_marker.id = marker_id++;
-      light_marker.type = visualization_msgs::msg::Marker::CYLINDER;
-      light_marker.action = visualization_msgs::msg::Marker::ADD;
-      
-      light_marker.pose.position.x = traffic_light.x;
-      light_marker.pose.position.y = traffic_light.y;
-      light_marker.pose.position.z = 5.0; // Fixed height above ground
-      light_marker.pose.orientation.w = 1.0;
-      
-      light_marker.scale.x = 1.0; // Larger diameter for visibility
-      light_marker.scale.y = 1.0;
-      light_marker.scale.z = 2.0; // Taller height
-      
-      // Color based on state
-      if (traffic_light.state == "red_yellow_green") {
-        light_marker.color.r = 1.0; light_marker.color.g = 1.0; light_marker.color.b = 0.0; // Yellow
-      } else {
-        light_marker.color.r = 0.0; light_marker.color.g = 1.0; light_marker.color.b = 0.0; // Green
-      }
-      light_marker.color.a = 0.9; // More opaque
-      
-      marker_array.markers.push_back(light_marker);
-      valid_lights++;
-      
-      // Debug first few lights
-      if (valid_lights <= 3) {
-        RCLCPP_INFO(this->get_logger(), "Traffic light %d: pos(%.2f, %.2f, %.2f)", 
-                    traffic_light.id, traffic_light.x, traffic_light.y, light_marker.pose.position.z);
-      }
-    }
-    
-    RCLCPP_INFO_ONCE(this->get_logger(), "Added %d traffic light markers (from %zu total)", 
-                     valid_lights, traffic_lights.size());
-  }
-  
-  // 5. Add traffic signs
-  if (show_traffic_signs_) {
-    int marker_id = 2000;
-    const auto& traffic_signs = hd_map_manager_->get_traffic_signs();
-    int valid_signs = 0;
-    
-    for (const auto& traffic_sign : traffic_signs) {
-      // Skip signs with invalid coordinates
-      if (std::abs(traffic_sign.x) > 2000 || std::abs(traffic_sign.y) > 2000) {
-        continue;
-      }
-      
-      visualization_msgs::msg::Marker sign_marker;
-      sign_marker.header.frame_id = map_frame_;
-      sign_marker.header.stamp = this->now();
-      sign_marker.ns = "traffic_signs";
-      sign_marker.id = marker_id++;
-      sign_marker.type = visualization_msgs::msg::Marker::CUBE;
-      sign_marker.action = visualization_msgs::msg::Marker::ADD;
-      
-      sign_marker.pose.position.x = traffic_sign.x;
-      sign_marker.pose.position.y = traffic_sign.y;
-      sign_marker.pose.position.z = 3.0; // Fixed height
-      sign_marker.pose.orientation.w = 1.0;
-      
-      sign_marker.scale.x = 0.6; // Larger and more visible
-      sign_marker.scale.y = 0.1; // Thicker
-      sign_marker.scale.z = 0.8;
-      
-      // Color based on sign type
-      if (traffic_sign.sign_type == "stop_sign") {
-        sign_marker.color.r = 1.0; sign_marker.color.g = 0.0; sign_marker.color.b = 0.0; // Red
-      } else {
-        sign_marker.color.r = 0.0; sign_marker.color.g = 0.0; sign_marker.color.b = 1.0; // Blue
-      }
-      sign_marker.color.a = 0.9;
-      
-      marker_array.markers.push_back(sign_marker);
-      valid_signs++;
-      
-      // Debug first few signs
-      if (valid_signs <= 3) {
-        RCLCPP_INFO(this->get_logger(), "Traffic sign %d (%s): pos(%.2f, %.2f, %.2f)", 
-                    traffic_sign.id, traffic_sign.sign_type.c_str(), 
-                    traffic_sign.x, traffic_sign.y, sign_marker.pose.position.z);
-      }
-    }
-    
-    RCLCPP_INFO_ONCE(this->get_logger(), "Added %d traffic sign markers (from %zu total)", 
-                     valid_signs, traffic_signs.size());
-  }
-  
-  // 6. Add crosswalks  
-  if (show_crosswalks_) {
-    int marker_id = 3000;
-    const auto& crosswalks = hd_map_manager_->get_crosswalks();
-    int valid_crosswalks = 0;
-    
-    for (const auto& crosswalk : crosswalks) {
-      if (crosswalk.boundary.size() < 2) continue;
-      
-      // Check if crosswalk coordinates are reasonable
-      bool valid_coords = true;
-      for (const auto& point : crosswalk.boundary) {
-        if (std::abs(point.first) > 2000 || std::abs(point.second) > 2000) {
-          valid_coords = false;
-          break;
-        }
-      }
-      if (!valid_coords) continue;
-      
-      visualization_msgs::msg::Marker crosswalk_marker;
-      crosswalk_marker.header.frame_id = map_frame_;
-      crosswalk_marker.header.stamp = this->now();
-      crosswalk_marker.ns = "crosswalks";
-      crosswalk_marker.id = marker_id++;
-      crosswalk_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-      crosswalk_marker.action = visualization_msgs::msg::Marker::ADD;
-      
-      crosswalk_marker.scale.x = 0.5; // Thicker line width
-      crosswalk_marker.color.r = 1.0; 
-      crosswalk_marker.color.g = 0.5; 
-      crosswalk_marker.color.b = 0.0; // Orange for visibility
-      crosswalk_marker.color.a = 0.9;
-      
-      for (const auto& point : crosswalk.boundary) {
-        geometry_msgs::msg::Point p;
-        p.x = point.first;
-        p.y = point.second;
-        p.z = 0.1; // Slightly higher above ground
-        crosswalk_marker.points.push_back(p);
-      }
-      
-      marker_array.markers.push_back(crosswalk_marker);
-      valid_crosswalks++;
-      
-      // Debug first few crosswalks
-      if (valid_crosswalks <= 2) {
-        RCLCPP_INFO(this->get_logger(), "Crosswalk %d: %zu points, first point(%.2f, %.2f)", 
-                    crosswalk.id, crosswalk.boundary.size(), 
-                    crosswalk.boundary[0].first, crosswalk.boundary[0].second);
-      }
-    }
-    
-    RCLCPP_INFO_ONCE(this->get_logger(), "Added %d crosswalk markers (from %zu total)", 
-                     valid_crosswalks, crosswalks.size());
-  }
-  
-  // 7. Add road markings
-  if (show_road_markings_) {
-    int marker_id = 4000;
-    const auto& road_markings = hd_map_manager_->get_road_markings();
-    
-    // Limit road markings to avoid overwhelming RViz
-    size_t max_markings = use_combined_markers_ ? 100 : 50;
-    size_t marking_count = 0;
-    
-    for (const auto& road_marking : road_markings) {
-      if (marking_count >= max_markings) break;
-      if (road_marking.geometry.size() < 2) continue;
-      
-      // Check if road marking coordinates are reasonable
-      bool valid_coords = true;
-      for (const auto& point : road_marking.geometry) {
-        if (std::abs(point.first) > 2000 || std::abs(point.second) > 2000) {
-          valid_coords = false;
-          break;
-        }
-      }
-      if (!valid_coords) continue;
-      
-      visualization_msgs::msg::Marker marking_marker;
-      marking_marker.header.frame_id = map_frame_;
-      marking_marker.header.stamp = this->now();
-      marking_marker.ns = "road_markings";
-      marking_marker.id = marker_id++;
-      marking_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-      marking_marker.action = visualization_msgs::msg::Marker::ADD;
-      
-      marking_marker.scale.x = 0.15; // Line width
-      
-      // Color based on marking type
-      if (road_marking.marking_type == "dashed") {
-        marking_marker.color.r = 1.0; marking_marker.color.g = 1.0; marking_marker.color.b = 0.0; // Yellow
-      } else {
-        marking_marker.color.r = 1.0; marking_marker.color.g = 1.0; marking_marker.color.b = 1.0; // White
-      }
-      marking_marker.color.a = 0.7;
-      
-      for (const auto& point : road_marking.geometry) {
-        geometry_msgs::msg::Point p;
-        p.x = point.first;
-        p.y = point.second;
-        p.z = 0.01; // Just above ground
-        marking_marker.points.push_back(p);
-      }
-      
-      marker_array.markers.push_back(marking_marker);
-      marking_count++;
-    }
-    
-    RCLCPP_INFO_ONCE(this->get_logger(), "Added %zu road marking markers (limited from %zu total)", 
-                     marking_count, road_markings.size());
   }
   
   // Publish the marker array
   marker_publisher_->publish(marker_array);
-  
-  RCLCPP_DEBUG(this->get_logger(), "Published %zu markers for %zu selected lanes", 
-               marker_array.markers.size(), selected_lanes.size());
 }
 
-std::vector<const awsim_path_planner::LaneInfo*> LaneletVisualizerNode::select_lanes_for_visualization() const
+std::vector<lanelet::ConstLanelet> LaneletVisualizerNode::select_lanelets_for_visualization() const
 {
-  const auto& all_lanes = hd_map_manager_->get_lanes();
-  std::vector<const awsim_path_planner::LaneInfo*> selected_lanes;
+  std::vector<lanelet::ConstLanelet> selected_lanelets;
   
-  // Simple selection: take first max_lanes_ lanes with non-empty centerlines
+  // Simple selection: take first max_lanes_ lanelets
   // In a real implementation, you'd select based on distance to vehicle
   
-  for (const auto& lane : all_lanes) {
-    if (selected_lanes.size() >= static_cast<size_t>(max_lanes_)) {
+  const auto& lanelets = lanelet_map_->laneletLayer;
+  for (const auto& lanelet : lanelets) {
+    if (selected_lanelets.size() >= static_cast<size_t>(max_lanes_)) {
       break;
     }
     
-    if (!lane.centerline.empty()) {
-      selected_lanes.push_back(&lane);
+    // Basic validity check
+    if (lanelet.centerline().size() > 1) {
+      selected_lanelets.push_back(lanelet);
     }
   }
   
   RCLCPP_INFO_ONCE(this->get_logger(), 
-    "Selected %zu lanes for visualization (max: %d, total available: %zu)", 
-    selected_lanes.size(), max_lanes_, all_lanes.size());
+    "Selected %zu lanelets for visualization (max: %d, total available: %zu)", 
+    selected_lanelets.size(), max_lanes_, lanelet_map_->laneletLayer.size());
   
   // Debug visualization parameters
   RCLCPP_INFO_ONCE(this->get_logger(), 
@@ -560,7 +351,7 @@ std::vector<const awsim_path_planner::LaneInfo*> LaneletVisualizerNode::select_l
     show_lane_ids_ ? "true" : "false",
     show_speed_limits_ ? "true" : "false");
   
-  return selected_lanes;
+  return selected_lanelets;
 }
 
 int main(int argc, char** argv)
@@ -574,7 +365,8 @@ int main(int argc, char** argv)
   try {
     rclcpp::spin(node);
   } catch (const std::exception& e) {
-    RCLCPP_ERROR(node->get_logger(), "Exception in lanelet visualizer: %s", e.what());
+    RCLCPP_ERROR(node->get_logger(), "Exception in visualizer node: %s", e.what());
+    return 1;
   }
   
   rclcpp::shutdown();

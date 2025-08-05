@@ -37,29 +37,57 @@ PathPlannerNode::PathPlannerNode(const rclcpp::NodeOptions & options)
   // Initialize parameters
   initialize_parameters();
   
-  // Setup ROS communication
+  // Initialize planning components based on selected algorithm first
+  if (planning_algorithm_ == "route" || planning_algorithm_ == "lanelet") {
+    // Initialize route planner only
+    route_planner_ = std::make_unique<RoutePlanner>(this);
+    
+    if (!lanelet_map_path_.empty()) {
+      RoutePlannerParam route_param;
+      route_param.map_file_path = lanelet_map_path_;
+      route_param.traffic_rules_name = traffic_rules_name_;
+      route_param.participant_name = participant_name_;
+      route_param.goal_search_radius = goal_search_radius_;
+      route_param.centerline_resolution = centerline_resolution_;
+      route_param.enable_lane_change = enable_lane_change_;
+      route_param.map_frame = map_frame_;
+      
+      if (route_planner_->initialize(route_param)) {
+        RCLCPP_INFO(this->get_logger(), "Successfully loaded lanelet2 map from: %s", lanelet_map_path_.c_str());
+        active_planner_ = "route";
+      } else {
+        RCLCPP_ERROR(this->get_logger(), "Failed to load lanelet2 map from: %s", lanelet_map_path_.c_str());
+        throw std::runtime_error("Route planner initialization failed");
+      }
+    } else {
+      RCLCPP_ERROR(this->get_logger(), "Route planner selected but no lanelet map path provided");
+      throw std::runtime_error("No lanelet map path provided for route planner");
+    }
+  } else if (planning_algorithm_ == "astar") {
+    // Initialize A* planner only
+    astar_planner_ = std::make_unique<AStarPlanner>(this);
+    astar_planner_->set_grid_resolution(grid_resolution_);
+    active_planner_ = "astar";
+    RCLCPP_INFO(this->get_logger(), "Initialized A* planner");
+  } else if (planning_algorithm_ == "rrt_star") {
+    // Initialize RRT* planner only  
+    rrt_star_planner_ = std::make_unique<RRTStarPlanner>(this);
+    active_planner_ = "rrt_star";
+    RCLCPP_INFO(this->get_logger(), "Initialized RRT* planner");
+  } else {
+    RCLCPP_ERROR(this->get_logger(), "Unknown planning algorithm: %s", planning_algorithm_.c_str());
+    throw std::runtime_error("Unknown planning algorithm specified");
+  }
+  
+  // Setup ROS communication (depends on active planner)
   setup_subscribers_and_publishers();
   
-  // Create timer for periodic occupancy grid publishing
-  grid_timer_ = this->create_wall_timer(
-    std::chrono::milliseconds(1000),  // Publish every 1 second
-    std::bind(&PathPlannerNode::publish_occupancy_grid, this));
-  
-  // Initialize planning components
-  astar_planner_ = std::make_unique<AStarPlanner>(this);
-  rrt_star_planner_ = std::make_unique<RRTStarPlanner>(this);
-  hd_map_manager_ = std::make_unique<HDMapManager>(this);
-  
-  // Configure planners
-  astar_planner_->set_grid_resolution(grid_resolution_);
-  
-  // Load HD map if specified
-  if (!hd_map_path_.empty()) {
-    if (hd_map_manager_->load_map(hd_map_path_)) {
-      RCLCPP_INFO(this->get_logger(), "Successfully loaded HD map from: %s", hd_map_path_.c_str());
-    } else {
-      RCLCPP_WARN(this->get_logger(), "Failed to load HD map from: %s", hd_map_path_.c_str());
-    }
+  // Create timer for periodic occupancy grid publishing (only for A* planner)
+  if (active_planner_ == "astar") {
+    grid_timer_ = this->create_wall_timer(
+      std::chrono::milliseconds(1000),  // Publish every 1 second
+      std::bind(&PathPlannerNode::publish_occupancy_grid, this));
+    RCLCPP_INFO(this->get_logger(), "Created occupancy grid timer for A* planner");
   }
   
   RCLCPP_INFO(this->get_logger(), "Path Planner Node initialized successfully");
@@ -74,15 +102,19 @@ void PathPlannerNode::initialize_parameters()
   this->declare_parameter("planning_algorithm", "astar");
   this->declare_parameter("map_frame", "map");
   this->declare_parameter("base_link_frame", "base_link");
-  this->declare_parameter("hd_map_path", "");
+  this->declare_parameter("lanelet_map_path", "");
   this->declare_parameter("grid_resolution", 0.5);
   this->declare_parameter("planning_timeout", 5.0);
-  this->declare_parameter("max_planning_range", 500.0);
-  this->declare_parameter("use_hd_map_constraints", true);
+  this->declare_parameter("max_planning_range", 1000.0);
+  this->declare_parameter("use_route_planning", true);
   this->declare_parameter("visualize_search_space", true);
-  this->declare_parameter("enforce_traffic_rules", true);
-  this->declare_parameter("lane_following_preference", 0.8);
-  this->declare_parameter("lane_change_penalty", 10.0);
+  
+  // Route planning parameters
+  this->declare_parameter("route_planner.traffic_rules_name", "german");
+  this->declare_parameter("route_planner.participant_name", "vehicle");
+  this->declare_parameter("route_planner.goal_search_radius", 10.0);
+  this->declare_parameter("route_planner.centerline_resolution", 0.5);
+  this->declare_parameter("route_planner.enable_lane_change", true);
   
   // A* specific parameters
   this->declare_parameter("astar.heuristic_weight", 1.0);
@@ -119,17 +151,19 @@ void PathPlannerNode::initialize_parameters()
   planning_algorithm_ = this->get_parameter("planning_algorithm").as_string();
   map_frame_ = this->get_parameter("map_frame").as_string();
   base_link_frame_ = this->get_parameter("base_link_frame").as_string();
-  hd_map_path_ = this->get_parameter("hd_map_path").as_string();
+  lanelet_map_path_ = this->get_parameter("lanelet_map_path").as_string();
   grid_resolution_ = this->get_parameter("grid_resolution").as_double();
   planning_timeout_ = this->get_parameter("planning_timeout").as_double();
   max_planning_range_ = this->get_parameter("max_planning_range").as_double();
-  use_hd_map_constraints_ = this->get_parameter("use_hd_map_constraints").as_bool();
+  use_route_planning_ = this->get_parameter("use_route_planning").as_bool();
   visualize_search_space_ = this->get_parameter("visualize_search_space").as_bool();
   
-  // HD map integration parameters
-  enforce_traffic_rules_ = this->get_parameter("enforce_traffic_rules").as_bool();
-  lane_following_preference_ = this->get_parameter("lane_following_preference").as_double();
-  lane_change_penalty_ = this->get_parameter("lane_change_penalty").as_double();
+  // Route planning parameters
+  traffic_rules_name_ = this->get_parameter("route_planner.traffic_rules_name").as_string();
+  participant_name_ = this->get_parameter("route_planner.participant_name").as_string();
+  goal_search_radius_ = this->get_parameter("route_planner.goal_search_radius").as_double();
+  centerline_resolution_ = this->get_parameter("route_planner.centerline_resolution").as_double();
+  enable_lane_change_ = this->get_parameter("route_planner.enable_lane_change").as_bool();
   
   // Get ground filtering parameters - enhanced for advanced filtering
   ground_filter_height_threshold_ = this->get_parameter("ground_filter.height_threshold").as_double();
@@ -165,7 +199,7 @@ void PathPlannerNode::setup_subscribers_and_publishers()
   auto reliable_qos = rclcpp::QoS(10).reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
   auto sensor_qos = rclcpp::QoS(10).reliability(RMW_QOS_POLICY_RELIABILITY_BEST_EFFORT);
   
-  // Subscribers
+  // Always subscribe to pose topics
   current_pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
     "/localization/pose_with_covariance", reliable_qos,
     std::bind(&PathPlannerNode::current_pose_callback, this, std::placeholders::_1));
@@ -174,22 +208,36 @@ void PathPlannerNode::setup_subscribers_and_publishers()
     "/planning/goal_pose", reliable_qos,
     std::bind(&PathPlannerNode::goal_pose_callback, this, std::placeholders::_1));
   
-  // Subscribe to map point cloud (static obstacles) - RELIABLE QoS
-  map_pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    "/localization/map", reliable_qos,
-    std::bind(&PathPlannerNode::map_pointcloud_callback, this, std::placeholders::_1));
-  
-  // Subscribe to raw point cloud (dynamic obstacles) - BEST_EFFORT QoS to match AWSIM LiDAR
-  raw_pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-    "/sensing/lidar/top/pointcloud_raw", sensor_qos,
-    std::bind(&PathPlannerNode::raw_pointcloud_callback, this, std::placeholders::_1));
+  // Only subscribe to point clouds for geometric planners (A* and RRT*)
+  if (active_planner_ == "astar" || active_planner_ == "rrt_star") {
+    // Subscribe to map point cloud (static obstacles) - RELIABLE QoS
+    map_pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+      "/localization/map", reliable_qos,
+      std::bind(&PathPlannerNode::map_pointcloud_callback, this, std::placeholders::_1));
+    
+    // Subscribe to raw point cloud (dynamic obstacles) - BEST_EFFORT QoS to match AWSIM LiDAR
+    raw_pointcloud_sub_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
+      "/sensing/lidar/top/pointcloud_raw", sensor_qos,
+      std::bind(&PathPlannerNode::raw_pointcloud_callback, this, std::placeholders::_1));
+    
+    RCLCPP_INFO(this->get_logger(), "Subscribed to point cloud topics for geometric planning");
+  } else {
+    RCLCPP_INFO(this->get_logger(), "Skipping point cloud subscriptions for route planner");
+  }
   
   // Publishers
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>("/planning/path", 10);
+  autoware_path_pub_ = this->create_publisher<autoware_planning_msgs::msg::Path>(
+    "/planning/path_with_lane_id", 10);
   marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(
     "/planning/visualization_markers", 10);
-  grid_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
-    "/planning/occupancy_grid", 10);
+  
+  // Only create occupancy grid publisher for A* planner
+  if (active_planner_ == "astar") {
+    grid_pub_ = this->create_publisher<nav_msgs::msg::OccupancyGrid>(
+      "/planning/occupancy_grid", 10);
+    RCLCPP_INFO(this->get_logger(), "Created occupancy grid publisher for A* planner");
+  }
   
   RCLCPP_INFO(this->get_logger(), "Publishers and subscribers initialized");
   RCLCPP_INFO(this->get_logger(), "Subscribed to map: /localization/map");
@@ -310,54 +358,65 @@ bool PathPlannerNode::plan_path(const geometry_msgs::msg::PoseStamped & start,
   
   std::vector<geometry_msgs::msg::PoseStamped> planned_path;
   
-  // Check if we have required data
-  if (!has_map_pointcloud_ && !has_raw_pointcloud_) {
-    RCLCPP_WARN(this->get_logger(), "No point cloud data available for planning");
-    return false;
-  }
-  
-  // Use combined point cloud if available, otherwise use what we have
-  sensor_msgs::msg::PointCloud2::SharedPtr planning_cloud;
-  if (combined_pointcloud_) {
-    planning_cloud = combined_pointcloud_;
-    RCLCPP_DEBUG(this->get_logger(), "Using combined point cloud for planning");
-  } else if (has_map_pointcloud_) {
-    planning_cloud = map_pointcloud_;
-    RCLCPP_DEBUG(this->get_logger(), "Using map point cloud for planning");
-  } else {
-    planning_cloud = raw_pointcloud_;
-    RCLCPP_DEBUG(this->get_logger(), "Using raw point cloud for planning");
-  }
-  
   try {
-    // Plan with selected algorithm
-    if (planning_algorithm_ == "astar") {
-      // Apply HD map constraints to A* planner if available
-      if (use_hd_map_constraints_ && hd_map_manager_->is_map_loaded()) {
-        planned_path = plan_path_with_hd_map(start, goal, planning_cloud);
-      } else {
-        planned_path = astar_planner_->plan_path(start, goal, planning_cloud);
+    // Use the active planner
+    if (active_planner_ == "route") {
+      RCLCPP_INFO(this->get_logger(), "Using route planning with lanelet2");
+      planned_path = plan_route_to_centerline(start, goal);
+      
+      if (planned_path.empty()) {
+        RCLCPP_WARN(this->get_logger(), "Route planning failed");
+        return false;
       }
-    } else if (planning_algorithm_ == "rrt_star") {
+      RCLCPP_INFO(this->get_logger(), "Route planning successful");
+      
+    } else if (active_planner_ == "astar") {
+      // Check if we have required data for geometric planning
+      if (!has_map_pointcloud_ && !has_raw_pointcloud_) {
+        RCLCPP_WARN(this->get_logger(), "No point cloud data available for A* planning");
+        return false;
+      }
+      
+      // Use combined point cloud if available, otherwise use what we have
+      sensor_msgs::msg::PointCloud2::SharedPtr planning_cloud;
+      if (combined_pointcloud_) {
+        planning_cloud = combined_pointcloud_;
+        RCLCPP_DEBUG(this->get_logger(), "Using combined point cloud for A* planning");
+      } else if (has_map_pointcloud_) {
+        planning_cloud = map_pointcloud_;
+        RCLCPP_DEBUG(this->get_logger(), "Using map point cloud for A* planning");
+      } else {
+        planning_cloud = raw_pointcloud_;
+        RCLCPP_DEBUG(this->get_logger(), "Using raw point cloud for A* planning");
+      }
+      
+      planned_path = astar_planner_->plan_path(start, goal, planning_cloud);
+      
+    } else if (active_planner_ == "rrt_star") {
+      // Check if we have required data for geometric planning
+      if (!has_map_pointcloud_ && !has_raw_pointcloud_) {
+        RCLCPP_WARN(this->get_logger(), "No point cloud data available for RRT* planning");
+        return false;
+      }
+      
+      // Use combined point cloud if available, otherwise use what we have
+      sensor_msgs::msg::PointCloud2::SharedPtr planning_cloud;
+      if (combined_pointcloud_) {
+        planning_cloud = combined_pointcloud_;
+        RCLCPP_DEBUG(this->get_logger(), "Using combined point cloud for RRT* planning");
+      } else if (has_map_pointcloud_) {
+        planning_cloud = map_pointcloud_;
+        RCLCPP_DEBUG(this->get_logger(), "Using map point cloud for RRT* planning");
+      } else {
+        planning_cloud = raw_pointcloud_;
+        RCLCPP_DEBUG(this->get_logger(), "Using raw point cloud for RRT* planning");
+      }
+      
       planned_path = rrt_star_planner_->plan_path(start, goal, planning_cloud);
+      
     } else {
-      RCLCPP_ERROR(this->get_logger(), "Unknown planning algorithm: %s", planning_algorithm_.c_str());
+      RCLCPP_ERROR(this->get_logger(), "Unknown active planner: %s", active_planner_.c_str());
       return false;
-    }
-    
-    // Apply HD map post-processing if enabled and available
-    if (use_hd_map_constraints_ && hd_map_manager_->is_map_loaded() && !planned_path.empty()) {
-      if (hd_map_manager_->is_path_valid(planned_path)) {
-        planned_path = hd_map_manager_->optimize_path_to_lanes(planned_path);
-        RCLCPP_INFO(this->get_logger(), "Path optimized using HD map constraints");
-      } else {
-        if (enforce_traffic_rules_) {
-          RCLCPP_WARN(this->get_logger(), "Planned path violates HD map constraints, rejecting path");
-          return false;
-        } else {
-          RCLCPP_WARN(this->get_logger(), "Planned path violates HD map constraints but proceeding");
-        }
-      }
     }
     
   } catch (const std::exception & e) {
@@ -400,26 +459,26 @@ void PathPlannerNode::publish_visualization_markers()
 {
   visualization_msgs::msg::MarkerArray markers;
   
-  // Get algorithm-specific visualizations
-  if (planning_algorithm_ == "astar") {
+  // Get algorithm-specific visualizations based on active planner
+  if (active_planner_ == "astar" && astar_planner_) {
     auto astar_markers = astar_planner_->get_search_visualization();
     markers.markers.insert(markers.markers.end(), 
                           astar_markers.markers.begin(), 
                           astar_markers.markers.end());
     
     // Publish occupancy grid
-    auto grid = astar_planner_->get_occupancy_grid();
-    grid_pub_->publish(grid);
-  } else if (planning_algorithm_ == "rrt_star") {
+    if (grid_pub_) {
+      auto grid = astar_planner_->get_occupancy_grid();
+      grid_pub_->publish(grid);
+    }
+  } else if (active_planner_ == "rrt_star" && rrt_star_planner_) {
     auto rrt_markers = rrt_star_planner_->get_tree_visualization();
     markers.markers.insert(markers.markers.end(), 
                           rrt_markers.markers.begin(), 
                           rrt_markers.markers.end());
-  }
-  
-  // Add HD map visualization if available
-  if (hd_map_manager_->is_map_loaded()) {
-    auto map_markers = hd_map_manager_->get_map_visualization();
+  } else if (active_planner_ == "route" && route_planner_ && route_planner_->is_map_loaded()) {
+    // Add lanelet map visualization for route planner
+    auto map_markers = route_planner_->get_lanelet_visualization();
     markers.markers.insert(markers.markers.end(), 
                           map_markers.markers.begin(), 
                           map_markers.markers.end());
@@ -442,6 +501,60 @@ geometry_msgs::msg::PoseStamped PathPlannerNode::transform_pose(
   }
   
   return pose_out;
+}
+
+std::vector<geometry_msgs::msg::PoseStamped> PathPlannerNode::plan_route_to_centerline(
+  const geometry_msgs::msg::PoseStamped& start,
+  const geometry_msgs::msg::PoseStamped& goal)
+{
+  std::vector<geometry_msgs::msg::PoseStamped> path;
+  
+  if (!route_planner_->is_map_loaded()) {
+    RCLCPP_WARN(this->get_logger(), "Lanelet2 map not loaded");
+    return path;
+  }
+  
+  try {
+    // Plan route using lanelet2
+    auto autoware_path = route_planner_->plan_route(start, goal);
+    
+    if (!autoware_path) {
+      RCLCPP_WARN(this->get_logger(), "Route planning failed");
+      return path;
+    }
+    
+    // Publish the Autoware-compatible path
+    autoware_path_pub_->publish(*autoware_path);
+    
+    // Convert to nav_msgs::Path for compatibility
+    auto nav_path = convert_autoware_path_to_nav_path(*autoware_path);
+    
+    // Convert nav_msgs::Path to vector of PoseStamped
+    path = nav_path.poses;
+    
+    RCLCPP_INFO(this->get_logger(), "Successfully planned route with %zu waypoints", path.size());
+    
+  } catch (const std::exception& e) {
+    RCLCPP_ERROR(this->get_logger(), "Route planning failed: %s", e.what());
+  }
+  
+  return path;
+}
+
+nav_msgs::msg::Path PathPlannerNode::convert_autoware_path_to_nav_path(
+  const autoware_planning_msgs::msg::Path& autoware_path)
+{
+  nav_msgs::msg::Path nav_path;
+  nav_path.header = autoware_path.header;
+  
+  for (const auto& path_point : autoware_path.points) {
+    geometry_msgs::msg::PoseStamped pose_stamped;
+    pose_stamped.header = autoware_path.header;
+    pose_stamped.pose = path_point.pose;
+    nav_path.poses.push_back(pose_stamped);
+  }
+  
+  return nav_path;
 }
 
 sensor_msgs::msg::PointCloud2::SharedPtr PathPlannerNode::filter_ground_points(
@@ -906,7 +1019,7 @@ sensor_msgs::msg::PointCloud2::SharedPtr PathPlannerNode::combine_pointclouds(
 
 void PathPlannerNode::publish_occupancy_grid()
 {
-  if (planning_algorithm_ == "astar" && (has_raw_pointcloud_ || combined_pointcloud_)) {
+  if (active_planner_ == "astar" && astar_planner_ && grid_pub_ && (has_raw_pointcloud_ || combined_pointcloud_)) {
     auto grid = astar_planner_->get_occupancy_grid();
     grid_pub_->publish(grid);
     RCLCPP_DEBUG(this->get_logger(), "Published occupancy grid");
@@ -915,6 +1028,11 @@ void PathPlannerNode::publish_occupancy_grid()
 
 void PathPlannerNode::update_occupancy_grid()
 {
+  // Only update occupancy grid for A* planner
+  if (active_planner_ != "astar" || !astar_planner_) {
+    return;
+  }
+  
   // Update occupancy grid using available point cloud data
   sensor_msgs::msg::PointCloud2::SharedPtr planning_cloud;
   
@@ -926,7 +1044,7 @@ void PathPlannerNode::update_occupancy_grid()
     return; // No data available
   }
   
-  if (planning_algorithm_ == "astar" && planning_cloud) {
+  if (planning_cloud) {
     // Use current vehicle position if available, otherwise use origin
     geometry_msgs::msg::PoseStamped vehicle_pose;
     vehicle_pose.header.frame_id = map_frame_;
@@ -950,125 +1068,6 @@ void PathPlannerNode::update_occupancy_grid()
       RCLCPP_DEBUG(this->get_logger(), "Grid update completed: %s", e.what());
     }
   }
-}
-
-std::vector<geometry_msgs::msg::PoseStamped> PathPlannerNode::plan_path_with_hd_map(
-  const geometry_msgs::msg::PoseStamped& start,
-  const geometry_msgs::msg::PoseStamped& goal,
-  const sensor_msgs::msg::PointCloud2::SharedPtr& planning_cloud)
-{
-  RCLCPP_INFO(this->get_logger(), "Planning path with HD map constraints");
-  
-  // Step 1: Get lane-following path suggestion from HD map
-  auto lane_following_path = hd_map_manager_->get_lane_following_path(start, goal);
-  
-  if (lane_following_path.empty()) {
-    RCLCPP_WARN(this->get_logger(), "No lane-following path found, falling back to standard A*");
-    return astar_planner_->plan_path(start, goal, planning_cloud);
-  }
-  
-  // Step 2: Validate lane-following path against obstacles
-  auto validated_path = validate_path_against_obstacles(lane_following_path, planning_cloud);
-  
-  if (!validated_path.empty()) {
-    RCLCPP_INFO(this->get_logger(), "Using lane-following path (%zu waypoints)", validated_path.size());
-    return validated_path;
-  }
-  
-  // Step 3: If lane-following path is blocked, try hybrid approach
-  RCLCPP_INFO(this->get_logger(), "Lane-following path blocked, using hybrid approach");
-  
-  // Use A* with HD map cost modifiers
-  auto astar_path = astar_planner_->plan_path(start, goal, planning_cloud);
-  
-  if (astar_path.empty()) {
-    return astar_path;
-  }
-  
-  // Step 4: Apply HD map constraints to A* result
-  return apply_hd_map_constraints(astar_path);
-}
-
-std::vector<geometry_msgs::msg::PoseStamped> PathPlannerNode::validate_path_against_obstacles(
-  const std::vector<geometry_msgs::msg::PoseStamped>& path,
-  const sensor_msgs::msg::PointCloud2::SharedPtr& planning_cloud)
-{
-  if (path.empty() || !planning_cloud) {
-    return {};
-  }
-  
-  // Convert point cloud to PCL for processing
-  pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_cloud(new pcl::PointCloud<pcl::PointXYZ>);
-  pcl::fromROSMsg(*planning_cloud, *pcl_cloud);
-  
-  // Build obstacle KD-tree for fast queries
-  pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
-  kdtree.setInputCloud(pcl_cloud);
-  
-  // Check each waypoint along the path
-  double vehicle_radius = 2.0;  // Vehicle safety radius in meters
-  std::vector<geometry_msgs::msg::PoseStamped> validated_path;
-  
-  for (const auto& waypoint : path) {
-    pcl::PointXYZ search_point;
-    search_point.x = waypoint.pose.position.x;
-    search_point.y = waypoint.pose.position.y;
-    search_point.z = waypoint.pose.position.z;
-    
-    // Search for nearby obstacles
-    std::vector<int> point_indices;
-    std::vector<float> point_distances;
-    
-    if (kdtree.radiusSearch(search_point, vehicle_radius, point_indices, point_distances) > 0) {
-      // Obstacle detected, path is blocked
-      RCLCPP_DEBUG(this->get_logger(), "Lane-following path blocked at waypoint (%f, %f)", 
-                   waypoint.pose.position.x, waypoint.pose.position.y);
-      break;
-    } else {
-      validated_path.push_back(waypoint);
-    }
-  }
-  
-  // Path is valid if we processed all waypoints
-  if (validated_path.size() == path.size()) {
-    return validated_path;
-  } else {
-    return {};  // Path is blocked
-  }
-}
-
-std::vector<geometry_msgs::msg::PoseStamped> PathPlannerNode::apply_hd_map_constraints(
-  const std::vector<geometry_msgs::msg::PoseStamped>& path)
-{
-  if (path.empty()) {
-    return path;
-  }
-  
-  std::vector<geometry_msgs::msg::PoseStamped> constrained_path;
-  
-  for (const auto& waypoint : path) {
-    // Check if waypoint is in driveable area
-    if (!hd_map_manager_->is_point_driveable(waypoint.pose.position.x, waypoint.pose.position.y)) {
-      if (enforce_traffic_rules_) {
-        // Skip non-driveable waypoints if enforcing rules
-        RCLCPP_DEBUG(this->get_logger(), "Skipping non-driveable waypoint at (%f, %f)",
-                     waypoint.pose.position.x, waypoint.pose.position.y);
-        continue;
-      }
-    }
-    
-    // Check speed limits and adjust if necessary
-    double speed_limit = hd_map_manager_->get_speed_limit_at_point(
-      waypoint.pose.position.x, waypoint.pose.position.y);
-    
-    auto modified_waypoint = waypoint;
-    // Note: Speed information would be stored in a custom message or twist field
-    // For now, we just validate the position
-    
-    constrained_path.push_back(modified_waypoint);
-  }
-  
-  return constrained_path;
 }
 
 }  // namespace awsim_path_planner

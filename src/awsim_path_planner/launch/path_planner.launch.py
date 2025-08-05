@@ -14,8 +14,8 @@ def generate_launch_description():
     # Declare launch arguments
     planning_algorithm_arg = DeclareLaunchArgument(
         'planning_algorithm',
-        default_value='astar',  # Set to A* for basic testing
-        description='Path planning algorithm: astar or rrt_star'
+        default_value='route',  # Set to route planner by default to use lanelet2
+        description='Path planning algorithm: route, astar, or rrt_star'
     )
     
     hd_map_path_arg = DeclareLaunchArgument(
@@ -44,7 +44,7 @@ def generate_launch_description():
     
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz',
-        default_value='false',
+        default_value='false',  # Enable RViz by default to see lanelet visualization
         description='Launch RViz for visualization'
     )
     
@@ -54,10 +54,16 @@ def generate_launch_description():
         description='Visualize search space and algorithm progress'
     )
     
+    use_lanelet_visualizer_arg = DeclareLaunchArgument(
+        'use_lanelet_visualizer',
+        default_value='true',
+        description='Launch lanelet visualizer for HD map visualization'
+    )
+    
     # Get package share directory
     pkg_share = get_package_share_directory('awsim_path_planner')
     
-    # Path planner node
+    # Path planner node with lanelet2 integration
     path_planner_node = Node(
         package='awsim_path_planner',
         executable='awsim_path_planner_node',
@@ -67,15 +73,22 @@ def generate_launch_description():
             'planning_algorithm': LaunchConfiguration('planning_algorithm'),
             'map_frame': 'map',
             'base_link_frame': 'base_link',
-            'hd_map_path': LaunchConfiguration('hd_map_path'),
+            'lanelet_map_path': LaunchConfiguration('hd_map_path'),  # Fixed parameter name
             'grid_resolution': LaunchConfiguration('grid_resolution'),
             'planning_timeout': 5.0,
-            'max_planning_range': 500.0,
-            'use_hd_map_constraints': LaunchConfiguration('use_hd_map_constraints'),
+            'max_planning_range': 1000.0,
+            'use_route_planning': True,  # Enable route planning
             'enforce_traffic_rules': LaunchConfiguration('enforce_traffic_rules'),
             'lane_following_preference': 0.8,
             'lane_change_penalty': 10.0,
             'visualize_search_space': LaunchConfiguration('visualize_search_space'),
+            
+            # Route planning parameters - using German traffic rules (best available for lanelet2)
+            'route_planner.traffic_rules_name': 'de',  # Use German traffic rules (most stable)
+            'route_planner.participant_name': 'vehicle',
+            'route_planner.goal_search_radius': 150.0,  # Increased radius for better goal finding
+            'route_planner.centerline_resolution': 1.0,  # Slightly coarser for better performance
+            'route_planner.enable_lane_change': True,
             
             # A* specific parameters
             'astar.heuristic_weight': 1.0,
@@ -113,9 +126,36 @@ def generate_launch_description():
             ('/planning/goal_pose', '/planning/goal_pose'),
             ('/sensing/lidar/top/pointcloud_raw', '/sensing/lidar/top/pointcloud_raw'),
             ('/planning/path', '/planning/path'),
+            ('/planning/route', '/planning/route'),  # Added for lanelet2 route planning
             ('/planning/visualization_markers', '/planning/visualization_markers'),
             ('/planning/occupancy_grid', '/planning/occupancy_grid'),
         ]
+    )
+    
+    # Lanelet visualizer node for HD map visualization
+    lanelet_visualizer_node = Node(
+        package='awsim_path_planner',
+        executable='lanelet_visualizer_node',
+        name='lanelet_visualizer_node',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('use_lanelet_visualizer')),
+        parameters=[{
+            'hd_map_path': LaunchConfiguration('hd_map_path'),
+            'map_frame': 'map',
+            'visualization_update_rate': 1.0,  # Slower update for better performance
+            'show_lane_boundaries': True,
+            'show_centerlines': True,
+            'show_lane_ids': False,  # Disable for cleaner view
+            'show_speed_limits': False,  # Disable for cleaner view
+            'max_visualization_distance': 2000.0,
+            'use_combined_markers': True,
+            'max_lanes_to_visualize': 10000,  # Increase for better coverage
+            'show_traffic_lights': False,
+            'show_traffic_signs': False,
+            'show_crosswalks': False,
+            'show_road_markings': False,
+            'show_regulatory_elements': False,
+        }]
     )
     
     # RViz node
@@ -138,9 +178,11 @@ def generate_launch_description():
         grid_resolution_arg,
         use_rviz_arg,
         visualize_search_space_arg,
+        use_lanelet_visualizer_arg,
         
         GroupAction([
             path_planner_node,
+            lanelet_visualizer_node,
             rviz_node,
         ])
     ])
