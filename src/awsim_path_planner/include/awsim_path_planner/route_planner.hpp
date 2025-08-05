@@ -27,6 +27,16 @@
 namespace awsim_path_planner
 {
 
+
+// Define the projection result structure
+struct ProjectionResult {
+    size_t segment_index;           // Index of the segment where projection occurs
+    double t;                       // Parameter [0,1] within the segment
+    geometry_msgs::msg::Point projection_point;  // Projected point
+    double distance;                // Distance from the point to the projection
+};
+
+
 struct RoutePlannerParam
 {
   std::string map_file_path;
@@ -84,6 +94,10 @@ private:
   std::vector<autoware_planning_msgs::msg::PathPoint> create_centerline_path(
     const lanelet::ConstLanelet & lanelet,
     double resolution = 0.5);
+
+  ProjectionResult project_point_to_path(
+    const std::vector<autoware_planning_msgs::msg::PathPoint>& path_points,
+    const geometry_msgs::msg::Point& point);
   
   // Find goal lanelet that best matches the goal pose orientation
   std::optional<lanelet::ConstLanelet> find_goal_lanelet(

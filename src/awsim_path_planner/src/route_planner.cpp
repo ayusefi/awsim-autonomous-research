@@ -239,13 +239,90 @@ autoware_planning_msgs::msg::Path RoutePlanner::convert_route_to_path(
   // Get all lanelets in the route
   auto route_lanelets = route.shortestPath();
   
-  for (const auto & lanelet : route_lanelets) {
-    // Create centerline path for this lanelet
-    auto centerline_points = create_centerline_path(lanelet, param_.centerline_resolution);
+  // Process each lanelet with position-aware trimming to avoid zigzag in lane changes
+  geometry_msgs::msg::Point last_position = start_pose.pose.position;
+  
+  for (size_t i = 0; i < route_lanelets.size(); ++i) {
+    auto centerline_points = create_centerline_path(route_lanelets[i], param_.centerline_resolution);
     
-    // Add points to the path
-    for (const auto & point : centerline_points) {
-      path.points.push_back(point);
+    if (centerline_points.empty()) {
+      continue;
+    }
+    
+    // For the first lanelet, find the closest point to start position and trim before it
+    if (i == 0) {
+      ProjectionResult start_proj = project_point_to_path(centerline_points, start_pose.pose.position);
+      
+      // Start from the projection point forward to avoid going backwards
+      size_t start_index = start_proj.segment_index;
+      
+      // Add the projected start point first if we have interpolation
+      if (start_proj.t > 0.0 && start_proj.segment_index < centerline_points.size() - 1) {
+        const auto& p1 = centerline_points[start_proj.segment_index];
+        const auto& p2 = centerline_points[start_proj.segment_index + 1];
+        autoware_planning_msgs::msg::PathPoint start_point;
+        start_point.pose.position.x = p1.pose.position.x + start_proj.t * (p2.pose.position.x - p1.pose.position.x);
+        start_point.pose.position.y = p1.pose.position.y + start_proj.t * (p2.pose.position.y - p1.pose.position.y);
+        start_point.pose.position.z = p1.pose.position.z + start_proj.t * (p2.pose.position.z - p1.pose.position.z);
+        start_point.pose.orientation = start_pose.pose.orientation;
+        start_point.longitudinal_velocity_mps = 5.0;
+        path.points.push_back(start_point);
+        last_position = start_point.pose.position;
+        start_index = start_proj.segment_index + 1;
+      } else {
+        // Use the exact start pose
+        autoware_planning_msgs::msg::PathPoint start_point;
+        start_point.pose = start_pose.pose;
+        start_point.longitudinal_velocity_mps = 5.0;
+        path.points.push_back(start_point);
+        last_position = start_pose.pose.position;
+      }
+      
+      // Add remaining points from this lanelet
+      for (size_t j = start_index; j < centerline_points.size(); ++j) {
+        path.points.push_back(centerline_points[j]);
+      }
+      
+      if (!centerline_points.empty()) {
+        last_position = centerline_points.back().pose.position;
+      }
+    }
+    // For subsequent lanelets, find the closest point to avoid going backwards
+    else {
+      ProjectionResult connection_proj = project_point_to_path(centerline_points, last_position);
+      
+      // Start from the closest point or slightly ahead to ensure forward progress
+      size_t start_index = std::min(connection_proj.segment_index + 1, centerline_points.size() - 1);
+      
+      // Add transition point if there's a significant gap
+      if (connection_proj.distance > 1.0) {
+        autoware_planning_msgs::msg::PathPoint transition_point;
+        transition_point.pose.position = connection_proj.projection_point;
+        
+        // Calculate orientation pointing towards the next segment
+        if (start_index < centerline_points.size()) {
+          double dx = centerline_points[start_index].pose.position.x - last_position.x;
+          double dy = centerline_points[start_index].pose.position.y - last_position.y;
+          double yaw = std::atan2(dy, dx);
+          tf2::Quaternion q;
+          q.setRPY(0, 0, yaw);
+          transition_point.pose.orientation = tf2::toMsg(q);
+        } else {
+          transition_point.pose.orientation = centerline_points[0].pose.orientation;
+        }
+        
+        transition_point.longitudinal_velocity_mps = 3.0;  // Slower for lane change
+        path.points.push_back(transition_point);
+      }
+      
+      // Add points from the connection point forward
+      for (size_t j = start_index; j < centerline_points.size(); ++j) {
+        path.points.push_back(centerline_points[j]);
+      }
+      
+      if (!centerline_points.empty()) {
+        last_position = centerline_points.back().pose.position;
+      }
     }
   }
   
@@ -255,20 +332,74 @@ autoware_planning_msgs::msg::Path RoutePlanner::convert_route_to_path(
     return path;
   }
   
-  // Adjust first and last points to match start and goal poses
-  if (!path.points.empty()) {
-    // Update first point to match start pose
-    auto & first_point = path.points.front();
-    first_point.pose.position = start_pose.pose.position;
-    first_point.pose.orientation = start_pose.pose.orientation;
-    
-    // Update last point to match goal pose  
-    auto & last_point = path.points.back();
-    last_point.pose.position = goal_pose.pose.position;
-    last_point.pose.orientation = goal_pose.pose.orientation;
+  // Handle the goal pose - project and trim the path appropriately
+  ProjectionResult goal_proj = project_point_to_path(path.points, goal_pose.pose.position);
+  
+  // Trim the path to end at or near the goal
+  if (goal_proj.segment_index < path.points.size()) {
+    // Keep points up to the goal projection
+    path.points.erase(path.points.begin() + goal_proj.segment_index + 1, path.points.end());
   }
   
+  // Add the exact goal pose as final point
+  autoware_planning_msgs::msg::PathPoint goal_point;
+  goal_point.pose = goal_pose.pose;
+  goal_point.longitudinal_velocity_mps = 0.0;  // Stop at goal
+  path.points.push_back(goal_point);
+  
   return path;
+}
+
+ProjectionResult RoutePlanner::project_point_to_path(
+    const std::vector<autoware_planning_msgs::msg::PathPoint>& path_points,
+    const geometry_msgs::msg::Point& point)
+{
+    ProjectionResult best_proj;
+    best_proj.distance = std::numeric_limits<double>::max();
+
+    // Iterate through each segment of the path
+    for (size_t i = 0; i < path_points.size() - 1; ++i) {
+        const auto& p1 = path_points[i].pose.position;
+        const auto& p2 = path_points[i + 1].pose.position;
+
+        // Vector from p1 to p2 (segment direction)
+        double dx = p2.x - p1.x;
+        double dy = p2.y - p1.y;
+        double dz = p2.z - p1.z;
+
+        // Vector from p1 to the point
+        double ax = point.x - p1.x;
+        double ay = point.y - p1.y;
+        double az = point.z - p1.z;
+
+        // Compute projection parameter t
+        double len_sq = dx * dx + dy * dy + dz * dz;
+        double t = (len_sq > 0) ? (ax * dx + ay * dy + az * dz) / len_sq : 0.0;
+        t = std::max(0.0, std::min(1.0, t));  // Clamp t to [0,1]
+
+        // Calculate the projection point
+        geometry_msgs::msg::Point proj_point;
+        proj_point.x = p1.x + t * dx;
+        proj_point.y = p1.y + t * dy;
+        proj_point.z = p1.z + t * dz;
+
+        // Compute distance from the point to the projection
+        double dist = std::sqrt(
+            (point.x - proj_point.x) * (point.x - proj_point.x) +
+            (point.y - proj_point.y) * (point.y - proj_point.y) +
+            (point.z - proj_point.z) * (point.z - proj_point.z)
+        );
+
+        // Update if this is the closest projection so far
+        if (dist < best_proj.distance) {
+            best_proj.distance = dist;
+            best_proj.segment_index = i;
+            best_proj.t = t;
+            best_proj.projection_point = proj_point;
+        }
+    }
+
+    return best_proj;
 }
 
 std::optional<lanelet::ConstLanelet> RoutePlanner::find_nearest_lanelet(
