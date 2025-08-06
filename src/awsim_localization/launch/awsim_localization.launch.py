@@ -121,7 +121,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'launch_rviz', 
-            default_value='true',
+            default_value='false',
             description='Whether to launch RViz2 for visualization'
         ),
         
@@ -270,13 +270,13 @@ def generate_launch_description():
         ),
 
         # RViz2 for visualization
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            output='screen',
-            parameters=[{'use_sim_time': True}],  # Enable simulation time for AWSIM
-            arguments=['-d', os.path.join(pkg_dir, 'rviz', 'awsim_localization.rviz')],
-            condition=IfCondition(LaunchConfiguration('launch_rviz'))
-        ),
+        # Node(
+        #     package='rviz2',
+        #     executable='rviz2',
+        #     name='rviz2',
+        #     output='screen',
+        #     parameters=[{'use_sim_time': True}],  # Enable simulation time for AWSIM
+        #     arguments=['-d', os.path.join(pkg_dir, 'rviz', 'awsim_localization.rviz')],
+        #     condition=IfCondition(LaunchConfiguration('launch_rviz'))
+        # ),
     ])

@@ -124,7 +124,7 @@ def generate_launch_description():
         remappings=[
             ('/localization/pose_with_covariance', '/localization/pose_with_covariance'),
             ('/planning/goal_pose', '/planning/goal_pose'),
-            ('/sensing/lidar/top/pointcloud_raw', '/sensing/lidar/top/pointcloud_raw'),
+            ('/sensing/lidar/top/pointcloud_raw', '/ground_filter/nonground_points'),  # Remap to ground filter output
             ('/planning/path', '/planning/path'),
             ('/planning/route', '/planning/route'),  # Added for lanelet2 route planning
             ('/planning/visualization_markers', '/planning/visualization_markers'),
