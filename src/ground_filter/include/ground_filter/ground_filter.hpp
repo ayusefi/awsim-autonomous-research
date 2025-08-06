@@ -44,4 +44,5 @@ private:
   double height_threshold_;   // Height threshold for grid-based filtering (meters)
   double k_multiplier_;       // Multiplier for standard deviation threshold
   bool use_grid_filter_;      // Enable grid-based refinement
+  double max_height_;         // Maximum height above the vehicle to consider a point (meters)
 };

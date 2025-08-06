@@ -15,7 +15,8 @@ GroundFilter::GroundFilter() : Node("ground_filter") {
   this->declare_parameter("height_threshold", 0.3); // meters
   this->declare_parameter("k_multiplier", 2.0);
   this->declare_parameter("use_grid_filter", true);
-  
+  this->declare_parameter("max_height", 2.5); // meters
+
   // Get parameter values
   distance_threshold_ = this->get_parameter("distance_threshold").as_double();
   max_angle_deg_ = this->get_parameter("max_angle").as_double();
@@ -25,14 +26,15 @@ GroundFilter::GroundFilter() : Node("ground_filter") {
   height_threshold_ = this->get_parameter("height_threshold").as_double();
   k_multiplier_ = this->get_parameter("k_multiplier").as_double();
   use_grid_filter_ = this->get_parameter("use_grid_filter").as_bool();
-  
+  max_height_ = this->get_parameter("max_height").as_double();
+
   // Convert angle to radians
   max_angle_rad_ = max_angle_deg_ * M_PI / 180.0;
 
   subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
     "/sensing/lidar/top/pointcloud_raw", rclcpp::SensorDataQoS(),
     std::bind(&GroundFilter::pointcloud_callback, this, std::placeholders::_1));
-    
+
   ground_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("ground_points", 10);
   nonground_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("nonground_points", 10);
 }
@@ -131,19 +133,23 @@ void GroundFilter::pointcloud_callback(const sensor_msgs::msg::PointCloud2::Shar
   pcl::PointCloud<pcl::PointXYZ>::Ptr refined_nonground_cloud(new pcl::PointCloud<pcl::PointXYZ>);
   
   for (const auto& point : cloud->points) {
+    // Exclude points above max_height_ from all outputs
+    if (point.z > max_height_) {
+      continue;
+    }
     int grid_x = static_cast<int>(std::floor(point.x / grid_size_));
     int grid_y = static_cast<int>(std::floor(point.y / grid_size_));
     auto key = std::make_pair(grid_x, grid_y);
-    
+
     bool is_ground = false;
-    
+
     if (use_grid_filter_ && cell_stats.find(key) != cell_stats.end()) {
       // Grid-based filtering
       auto stats = cell_stats[key];
       float mean_z = stats.first;
       float std_dev = stats.second;
       float threshold = std::max(height_threshold_, k_multiplier_ * std_dev);
-      
+
       if (std::abs(point.z - mean_z) <= threshold) {
         is_ground = true;
       }
@@ -153,17 +159,17 @@ void GroundFilter::pointcloud_callback(const sensor_msgs::msg::PointCloud2::Shar
       float b = coefficients->values[1];
       float c = coefficients->values[2];
       float d = coefficients->values[3];
-      
+
       if (std::abs(c) > 1e-5) { // Avoid division by zero
         float expected_z = (-a * point.x - b * point.y - d) / c;
         float distance = std::abs(point.z - expected_z);
-        
+
         if (distance <= distance_threshold_) {
           is_ground = true;
         }
       }
     }
-    
+
     if (is_ground) {
       refined_ground_cloud->points.push_back(point);
     } else {
@@ -182,6 +188,7 @@ void GroundFilter::pointcloud_callback(const sensor_msgs::msg::PointCloud2::Shar
   nonground_msg.header = msg->header;
   nonground_pub_->publish(nonground_msg);
   
+
 }
 
 int main(int argc, char **argv) {

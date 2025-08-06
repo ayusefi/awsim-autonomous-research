@@ -4,6 +4,11 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
+    max_height_arg = DeclareLaunchArgument(
+        'max_height',
+        default_value='1.0',
+        description='Maximum height above the vehicle to consider a point (meters)'
+    )
     # Declare launch arguments with default values
     distance_threshold_arg = DeclareLaunchArgument(
         'distance_threshold',
@@ -63,6 +68,7 @@ def generate_launch_description():
         height_threshold_arg,
         k_multiplier_arg,
         use_grid_filter_arg,
+        max_height_arg,
         
         # Ground filter node
         Node(
@@ -80,6 +86,7 @@ def generate_launch_description():
                     'height_threshold': LaunchConfiguration('height_threshold'),
                     'k_multiplier': LaunchConfiguration('k_multiplier'),
                     'use_grid_filter': LaunchConfiguration('use_grid_filter'),
+                    'max_height': LaunchConfiguration('max_height'),
                 }
             ],
             remappings=[

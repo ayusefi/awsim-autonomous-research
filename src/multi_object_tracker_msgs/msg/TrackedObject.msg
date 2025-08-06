@@ -1,0 +1,10 @@
+std_msgs/Header header
+int32 id
+geometry_msgs/Point position
+geometry_msgs/Quaternion orientation
+geometry_msgs/Vector3 velocity
+geometry_msgs/Vector3 angular_velocity
+geometry_msgs/Vector3 dimensions
+string state
+int32 age
+int32 time_since_update
