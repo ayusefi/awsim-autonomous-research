@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ground_filter</name>
+  <version>0.0.1</version>
+  <description>Ground filter node for PointCloud2 using state-of-the-art algorithms.</description>
+  <maintainer email="user@example.com">Your Name</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <build_depend>rclcpp</build_depend>
+  <build_depend>sensor_msgs</build_depend>
+  <build_depend>pcl_conversions</build_depend>
+  <build_depend>PCL</build_depend>
+
+  <build_depend>pcl_ros</build_depend>
+
+  <exec_depend>rclcpp</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>pcl_conversions</exec_depend>
+  <exec_depend>PCL</exec_depend>
+
+  <exec_depend>pcl_ros</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
