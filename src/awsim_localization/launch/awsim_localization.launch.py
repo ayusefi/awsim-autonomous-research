@@ -116,7 +116,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'use_ground_truth_init', 
-            default_value='false',
+            default_value='true',
             description='Whether to initialize pose from ground truth'
         ),
         DeclareLaunchArgument(

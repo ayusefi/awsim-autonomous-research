@@ -14,6 +14,7 @@ def generate_launch_description():
     route_planning_pkg_dir = FindPackageShare('awsim_path_planner')
     trajectory_planning_pkg_dir = FindPackageShare('awsim_trajectory_planner')
     awsim_bringup_pkg_dir = FindPackageShare('awsim_bringup')
+    awsim_object_tracker_pkg_dir = FindPackageShare('awsim_object_tracker')
     
     # Launch arguments
     use_sim_time_arg = DeclareLaunchArgument(
@@ -58,6 +59,12 @@ def generate_launch_description():
             PathJoinSubstitution([route_planning_pkg_dir, 'launch', 'path_planner.launch.py'])
         ])
     )
+
+    object_tracker_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([awsim_object_tracker_pkg_dir, 'launch', 'tracker.launch.py'])
+        ])
+    )
     trajectory_planner_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([
             PathJoinSubstitution([trajectory_planning_pkg_dir, 'launch', 'trajectory_planner.launch.py'])
@@ -93,6 +100,7 @@ def generate_launch_description():
         ground_filter_launch,
         localization_launch,
         delayed_path_planner_launch,
+        object_tracker_launch,
         # delayed_trajectory_planner_launch,
         rviz_node,
     ])
