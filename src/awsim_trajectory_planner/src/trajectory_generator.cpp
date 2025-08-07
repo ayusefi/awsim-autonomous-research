@@ -55,6 +55,10 @@ Trajectory TrajectoryGenerator::generateRolloutTrajectory(
     return trajectory;
   }
 
+  // Pre-allocate trajectory capacity for better performance
+  int max_points = static_cast<int>(params_.prediction_horizon / params_.time_step) + 1;
+  trajectory.reserve(max_points);
+
   double time = 0.0;
   VehicleState state = current_state;
   double lookahead_distance = 5.0;  // e.g., 5 meters, adjustable or velocity-based
@@ -63,15 +67,15 @@ Trajectory TrajectoryGenerator::generateRolloutTrajectory(
     TrajectoryPoint point;
     point.time = time;
 
-    // Find the closest reference point
-    double min_distance = std::numeric_limits<double>::max();
+    // Find the closest reference point (optimized search)
+    double min_dist_sq = std::numeric_limits<double>::max();
     size_t closest_idx = 0;
     for (size_t i = 0; i < reference_poses.size(); ++i) {
       double dx = reference_poses[i].pose.position.x - state.x;
       double dy = reference_poses[i].pose.position.y - state.y;
-      double distance = std::sqrt(dx * dx + dy * dy);
-      if (distance < min_distance) {
-        min_distance = distance;
+      double dist_sq = dx * dx + dy * dy;
+      if (dist_sq < min_dist_sq) {
+        min_dist_sq = dist_sq;
         closest_idx = i;
       }
     }
@@ -147,17 +151,17 @@ std::vector<geometry_msgs::msg::PoseStamped> TrajectoryGenerator::sampleGlobalPa
     return sampled_poses;
   }
 
-  // Find the closest point on the global path to the current position
-  double min_distance = std::numeric_limits<double>::max();
+  // Find the closest point on the global path to the current position (optimized)
+  double min_dist_sq = std::numeric_limits<double>::max();
   size_t start_idx = 0;
 
   for (size_t i = 0; i < global_path.poses.size(); ++i) {
     double dx = global_path.poses[i].pose.position.x - current_state.x;
     double dy = global_path.poses[i].pose.position.y - current_state.y;
-    double distance = std::sqrt(dx * dx + dy * dy);
+    double dist_sq = dx * dx + dy * dy;
 
-    if (distance < min_distance) {
-      min_distance = distance;
+    if (dist_sq < min_dist_sq) {
+      min_dist_sq = dist_sq;
       start_idx = i;
     }
   }

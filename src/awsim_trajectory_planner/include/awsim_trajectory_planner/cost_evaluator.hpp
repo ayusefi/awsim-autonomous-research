@@ -47,12 +47,9 @@ public:
   // Individual cost components
   double calculateObstacleCost(const Trajectory& trajectory,
                               const std::vector<Obstacle>& obstacles);
-
   double calculatePathDeviationCost(const Trajectory& trajectory,
                                    const nav_msgs::msg::Path& global_path);
-
   double calculateSmoothnessCost(const Trajectory& trajectory);
-
   double calculateComfortCost(const Trajectory& trajectory);
 
 private:
@@ -60,14 +57,19 @@ private:
   double distanceToPath(double x, double y, const nav_msgs::msg::Path& path);
   
   double distanceToNearestObstacle(double x, double y,
-                                  const std::vector<Obstacle>& obstacles);
-
+                                const std::vector<Obstacle>& obstacles);
   double calculateCurvatureChange(const TrajectoryPoint& p1,
                                  const TrajectoryPoint& p2,
                                  const TrajectoryPoint& p3);
-
   geometry_msgs::msg::PoseStamped findClosestPoseOnPath(
     double x, double y, const nav_msgs::msg::Path& path);
+
+  // Continuous collision checking for trajectory segments
+  bool isSegmentColliding(
+    const TrajectoryPoint& p1, 
+    const TrajectoryPoint& p2,
+    const std::vector<Obstacle>& obstacles,
+    double safety_margin) const;
 
   CostEvaluationParams params_;
 };

@@ -19,56 +19,99 @@ std::vector<TrajectoryCost> CostEvaluator::evaluateTrajectories(
   const std::vector<Obstacle>& obstacles)
 {
   std::vector<TrajectoryCost> costs;
+  costs.reserve(trajectories.size());
 
   for (const auto& trajectory : trajectories) {
     TrajectoryCost cost;
 
-    // Check collision first (early termination if collision detected)
+    // BINARY SAFETY CHECK: If ANY point violates safety margin, trajectory is REJECTED
     cost.is_collision_free = true;
+    
+    // Check discrete points using oriented bounding box collision detection
     for (const auto& point : trajectory) {
-      bool point_collision_free = true;
       for (const auto& obstacle : obstacles) {
-        double dx = point.x - obstacle.x;
-        double dy = point.y - obstacle.y;
-        double distance = std::sqrt(dx * dx + dy * dy);
+        // Calculate minimum distance to oriented bounding box
+        double distance = obstacle.distanceToPoint(point.x, point.y);
         
-        if (distance < obstacle.radius + params_.safety_margin) {
-          point_collision_free = false;
+        if (distance < params_.safety_margin) {
           cost.is_collision_free = false;
+          RCLCPP_DEBUG(rclcpp::get_logger("CostEvaluator"), 
+                      "Trajectory REJECTED: point(%.2f,%.2f) too close to OBB (distance=%.2fm < safety_margin=%.2fm)", 
+                      point.x, point.y, distance, params_.safety_margin);
           break;
         }
       }
-      if (!point_collision_free) {
-        break;
+      if (!cost.is_collision_free) {
+        break; // Early termination - trajectory is rejected
       }
     }
 
-    // If trajectory has collision, assign high cost and skip other calculations
+    // If trajectory is still collision-free, check segments between points (continuous collision)
+    if (cost.is_collision_free && trajectory.size() > 1) {
+      for (size_t i = 0; i < trajectory.size() - 1; ++i) {
+        if (isSegmentColliding(trajectory[i], trajectory[i+1], obstacles, params_.safety_margin)) {
+          cost.is_collision_free = false;
+          RCLCPP_DEBUG(rclcpp::get_logger("CostEvaluator"), 
+                      "Trajectory REJECTED: segment between points %zu and %zu collides with obstacle", i, i+1);
+          break;
+        }
+      }
+    }
+
+    // If trajectory violates safety margin, mark as OCCUPIED (not selectable)
     if (!cost.is_collision_free) {
-      cost.obstacle_cost = 1e6;  // Very high cost for collision
-      cost.path_deviation_cost = 0.0;
-      cost.smoothness_cost = 0.0;
-      cost.comfort_cost = 0.0;
-      cost.total_cost = cost.obstacle_cost;
+      cost.obstacle_cost = std::numeric_limits<double>::infinity();
+      cost.path_deviation_cost = std::numeric_limits<double>::infinity();
+      cost.smoothness_cost = std::numeric_limits<double>::infinity();
+      cost.comfort_cost = std::numeric_limits<double>::infinity();
+      cost.total_cost = std::numeric_limits<double>::infinity();
+      RCLCPP_DEBUG(rclcpp::get_logger("CostEvaluator"), "Trajectory marked as OCCUPIED due to safety violation");
     } else {
-      // Calculate individual cost components
-      cost.obstacle_cost = calculateObstacleCost(trajectory, obstacles);
+      // Trajectory is SAFE - calculate quality scores based on other factors
+      cost.obstacle_cost = 0.0; // No obstacle penalty for safe trajectories
       cost.path_deviation_cost = calculatePathDeviationCost(trajectory, global_path);
       cost.smoothness_cost = calculateSmoothnessCost(trajectory);
       cost.comfort_cost = calculateComfortCost(trajectory);
 
-      // Calculate weighted total cost
+      // Calculate weighted total cost (lower is better)
       cost.total_cost = 
-        params_.obstacle_cost_weight * cost.obstacle_cost +
         params_.path_deviation_weight * cost.path_deviation_cost +
         params_.smoothness_weight * cost.smoothness_cost +
         params_.comfort_weight * cost.comfort_cost;
+        
+      RCLCPP_DEBUG(rclcpp::get_logger("CostEvaluator"), 
+                  "Safe trajectory scored: deviation=%.3f, smoothness=%.3f, comfort=%.3f, total=%.3f",
+                  cost.path_deviation_cost, cost.smoothness_cost, cost.comfort_cost, cost.total_cost);
     }
 
     costs.push_back(cost);
   }
 
   return costs;
+}
+
+bool CostEvaluator::isSegmentColliding(
+    const TrajectoryPoint& p1, 
+    const TrajectoryPoint& p2,
+    const std::vector<Obstacle>& obstacles,
+    double safety_margin) const
+{
+    // Check multiple points along the segment using oriented bounding box collision
+    const int steps = 10; // Increased resolution for better accuracy
+    for (int i = 1; i < steps; ++i) {
+        double t = static_cast<double>(i) / steps;
+        double x = p1.x + t * (p2.x - p1.x);
+        double y = p1.y + t * (p2.y - p1.y);
+        
+        for (const auto& obstacle : obstacles) {
+            // Use oriented bounding box distance calculation
+            double distance = obstacle.distanceToPoint(x, y);
+            if (distance < safety_margin) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 int CostEvaluator::selectBestTrajectory(const std::vector<TrajectoryCost>& costs)
@@ -80,22 +123,22 @@ int CostEvaluator::selectBestTrajectory(const std::vector<TrajectoryCost>& costs
   int best_idx = -1;
   double min_cost = std::numeric_limits<double>::max();
 
+  // Only consider SAFE trajectories (collision-free within safety margin)
   for (size_t i = 0; i < costs.size(); ++i) {
-    // Prioritize collision-free trajectories
-    if (costs[i].is_collision_free && costs[i].total_cost < min_cost) {
-      min_cost = costs[i].total_cost;
-      best_idx = static_cast<int>(i);
-    }
-  }
-
-  // If no collision-free trajectory found, select the one with minimum collision cost
-  if (best_idx == -1) {
-    for (size_t i = 0; i < costs.size(); ++i) {
+    if (costs[i].is_collision_free && std::isfinite(costs[i].total_cost)) {
       if (costs[i].total_cost < min_cost) {
         min_cost = costs[i].total_cost;
         best_idx = static_cast<int>(i);
       }
     }
+  }
+
+  if (best_idx >= 0) {
+    RCLCPP_DEBUG(rclcpp::get_logger("CostEvaluator"), 
+                "Selected safe trajectory %d with cost %.3f", best_idx, min_cost);
+  } else {
+    RCLCPP_WARN(rclcpp::get_logger("CostEvaluator"), 
+               "No safe trajectories found - all violate safety margin");
   }
 
   return best_idx;
@@ -187,16 +230,17 @@ double CostEvaluator::distanceToPath(double x, double y, const nav_msgs::msg::Pa
     return 0.0;
   }
 
-  double min_distance = std::numeric_limits<double>::max();
+  double min_dist_sq = std::numeric_limits<double>::max();
 
+  // Use squared distance to avoid sqrt calculations
   for (const auto& pose : path.poses) {
     double dx = x - pose.pose.position.x;
     double dy = y - pose.pose.position.y;
-    double distance = std::sqrt(dx * dx + dy * dy);
-    min_distance = std::min(min_distance, distance);
+    double dist_sq = dx * dx + dy * dy;
+    min_dist_sq = std::min(min_dist_sq, dist_sq);
   }
 
-  return min_distance;
+  return std::sqrt(min_dist_sq);
 }
 
 double CostEvaluator::distanceToNearestObstacle(
@@ -210,10 +254,13 @@ double CostEvaluator::distanceToNearestObstacle(
   double min_distance = std::numeric_limits<double>::max();
 
   for (const auto& obstacle : obstacles) {
-    double dx = x - obstacle.x;
-    double dy = y - obstacle.y;
-    double distance = std::sqrt(dx * dx + dy * dy) - obstacle.radius;
-    min_distance = std::min(min_distance, std::max(0.0, distance));
+    double distance = obstacle.distanceToPoint(x, y);
+    min_distance = std::min(min_distance, distance);
+    
+    // Early termination if very close
+    if (min_distance < 0.1) {
+      return 0.0;
+    }
   }
 
   return min_distance;

@@ -37,7 +37,7 @@ def generate_launch_description():
             # Input topics
             ('/planning/global_path', '/planning/path'),
             ('/localization/odometry', '/localization/pose_with_covariance'),
-            ('/sensing/lidar/concatenated/pointcloud', '/sensing/lidar/top/pointcloud_raw'),
+            ('/sensing/lidar/concatenated/pointcloud', '/ground_filter/nonground_points'),
             
             # Output topics
             ('/planning/local_trajectory', '/planning/trajectory_planner/local_trajectory'),
