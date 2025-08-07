@@ -71,10 +71,16 @@ void Track::update(const std::shared_ptr<Detection>& detection) {
   time_since_update = 0;
   last_detection = detection;
   
-  // Update orientation with improved smoothing
+  // Update orientation with improved smoothing using velocity direction
   if (hits == 1) {
-    // First update, use detection orientation directly
-    orientation = detection->orientation;
+    // First update, set orientation based on velocity if available
+    {
+      Eigen::Vector3d vel = kf->getVelocity();
+      if (vel.norm() > 1e-3) {
+        double yaw = std::atan2(vel.y(), vel.x());
+        orientation = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ());
+      }
+    }
     angular_velocity = Eigen::Vector3d::Zero();
   } else {
     // Store previous orientation for angular velocity calculation
@@ -85,8 +91,21 @@ void Track::update(const std::shared_ptr<Detection>& detection) {
     double confidence_factor = std::min(1.0, hits / 10.0);  // Gain confidence over time
     double adaptive_smoothing = base_smoothing + (0.2 * confidence_factor);
     
+    // Determine new orientation based on velocity direction
+    Eigen::Vector3d vel = kf->getVelocity();
+    // Prevent orientation jitter for near-zero velocities
+    const double vel_thresh = 0.1;  // m/s threshold for stationary
+    Eigen::Quaterniond new_orientation;
+    if (vel.norm() > vel_thresh) {
+      double yaw = std::atan2(vel.y(), vel.x());
+      new_orientation = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ());
+    } else {
+      // Keep previous orientation when stationary
+      new_orientation = prev_orientation;
+      angular_velocity = Eigen::Vector3d::Zero();
+    }
     // Apply orientation smoothing
-    updateOrientation(detection->orientation, adaptive_smoothing);
+    updateOrientation(new_orientation, adaptive_smoothing);
     
     // Calculate angular velocity (simplified approximation)
     Eigen::Quaterniond q_diff = orientation * prev_orientation.inverse();

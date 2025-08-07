@@ -44,32 +44,32 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'dbscan_eps',
-            default_value='1.7',
-            description='DBSCAN epsilon parameter'
+            default_value='0.6',  # ~0.6m for Velodyne HDL-16 clustering
+            description='DBSCAN epsilon parameter (cluster radius)'
         ),
         DeclareLaunchArgument(
             'dbscan_min_points',
-            default_value='10',
+            default_value='30',  # require more points per cluster for HDL-16
             description='DBSCAN minimum points parameter'
         ),
         DeclareLaunchArgument(
             'filter_min_volume',
-            default_value='1.0',
-            description='Minimum bounding box volume'
+            default_value='2.5',  # filter out small noise clusters
+            description='Minimum bounding box volume (m^3)'
         ),
         DeclareLaunchArgument(
             'filter_max_volume',
-            default_value='200.0',
-            description='Maximum bounding box volume'
+            default_value='80.0',  # filter out excessively large clusters
+            description='Maximum bounding box volume (m^3)'
         ),
         DeclareLaunchArgument(
             'filter_min_points',
-            default_value='20',
+            default_value='40',  # higher threshold for HDL-16 density
             description='Minimum points in a cluster'
         ),
         DeclareLaunchArgument(
             'filter_max_points',
-            default_value='5000',
+            default_value='3000',  # cap max points to avoid huge clusters
             description='Maximum points in a cluster'
         ),
         

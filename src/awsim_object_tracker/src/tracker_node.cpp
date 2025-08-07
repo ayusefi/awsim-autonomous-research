@@ -122,7 +122,7 @@ void TrackerNode::pointCloudCallback(
   
   // Publish both tracked objects and markers at the same frequency
   publishTrackedObjects(transformed_cloud.header);
-  // publishMarkers(transformed_cloud.header);
+  publishMarkers(transformed_cloud.header);
 }
 
 void TrackerNode::publishTrackedObjects(const std_msgs::msg::Header& header) {

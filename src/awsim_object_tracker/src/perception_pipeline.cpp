@@ -124,26 +124,37 @@ std::vector<Detection> PerceptionPipeline::createDetections(
   for (const auto& cluster : clusters) {
     Detection detection;
     
-    // Get bounding box
+    // Calculate centroid and initial bounding box (for center)
     pcl::PointXYZ min_pt, max_pt;
     pcl::getMinMax3D(*cluster, min_pt, max_pt);
+    Eigen::Vector3d centroid((min_pt.x + max_pt.x) / 2.0,
+                              (min_pt.y + max_pt.y) / 2.0,
+                              (min_pt.z + max_pt.z) / 2.0);
+    detection.center = centroid;
     
-    // Calculate center
-    detection.center = Eigen::Vector3d(
-      (min_pt.x + max_pt.x) / 2.0,
-      (min_pt.y + max_pt.y) / 2.0,
-      (min_pt.z + max_pt.z) / 2.0
-    );
+    // Compute orientation using PCA
+    Eigen::Quaterniond q = calculateOrientation(cluster);
+    detection.orientation = q;
     
-    // Calculate dimensions
-    detection.dimensions = Eigen::Vector3d(
-      max_pt.x - min_pt.x,
-      max_pt.y - min_pt.y,
-      max_pt.z - min_pt.z
-    );
-    
-    // Calculate orientation using PCA
-    detection.orientation = calculateOrientation(cluster);
+    // Compute oriented bounding box dimensions: project points into local frame
+    Eigen::Vector3d local_min(std::numeric_limits<double>::infinity(),
+                              std::numeric_limits<double>::infinity(),
+                              std::numeric_limits<double>::infinity());
+    Eigen::Vector3d local_max(-std::numeric_limits<double>::infinity(),
+                              -std::numeric_limits<double>::infinity(),
+                              -std::numeric_limits<double>::infinity());
+    Eigen::Matrix3d R = q.toRotationMatrix().transpose();  // world to local
+    for (const auto& pt : *cluster) {
+      Eigen::Vector3d p(pt.x, pt.y, pt.z);
+      Eigen::Vector3d local = R * (p - centroid);
+      local_min = local_min.cwiseMin(local);
+      local_max = local_max.cwiseMax(local);
+    }
+    detection.dimensions = local_max - local_min;
+    // Enforce that length (x) is the larger dimension for rectangle assumption
+    if (detection.dimensions.x() < detection.dimensions.y()) {
+      std::swap(detection.dimensions.x(), detection.dimensions.y());
+    }
     
     // Store points
     detection.points = cluster;
