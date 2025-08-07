@@ -17,23 +17,37 @@ My journey into autonomous driving development using the AWSIM simulator. This r
 - **Live visualization** in RViz2 with pose tracking and fitness scores
 - **Automatic initialization** from ground truth for seamless startup
 
+
 ### Sensor Data Processing ✅
 - **Multi-sensor data logging** from AWSIM
 - **Synchronized data capture** (LiDAR, cameras, IMU)
 - **Real-time data analysis** and visualization
 - **Point cloud filtering** and preprocessing
 
-## Repository Structure
+### Ground Filter Package ✅
+- **Ground segmentation** from LiDAR point clouds using RANSAC and grid-based refinement
+- **Separates ground and non-ground points** for downstream perception modules
+- **Highly configurable** for different terrain types
 
+### Object Tracker Package ✅
+- **Real-time multi-object tracking** from LiDAR point clouds
+- **DBSCAN clustering** for object detection
+- **Kalman filter-based tracking** with occlusion handling
+- **Smooth, robust trajectories** for vehicles, pedestrians, and cyclists
+
+## Repository Structure
 ```
 src/
-├── awsim_path_planner/    # Multi-algorithm path planning with HD map integration
-├── awsim_localization/    # NDT-based localization with pre-built maps
-├── awsim_sensor_logger/   # Multi-sensor data logging and analysis  
-├── awsim_bringup/         # Launch files and system integration
-└── config/                # Parameter files and configurations
+├── awsim_path_planner/      # Multi-algorithm path planning with HD map integration
+├── awsim_localization/      # NDT-based localization with pre-built maps
+├── awsim_sensor_logger/     # Multi-sensor data logging and analysis  
+├── awsim_object_tracker/    # Real-time multi-object tracking from LiDAR point clouds
+├── ground_filter/           # Ground point filtering for LiDAR data
+├── awsim_bringup/           # Launch files and system integration
+└── config/                  # Parameter files and configurations
 
-shinjuku_map/              # HD map data with Lanelet2 format
+shinjuku_map/                # HD map data with Lanelet2 format
+
 ```
 
 ## 🚀 Quick Start
@@ -51,6 +65,7 @@ cd awsim-autonomous-research
 colcon build
 source install/setup.bash
 ```
+
 
 ### Launch NDT Localization
 ```bash
@@ -74,12 +89,30 @@ ros2 launch awsim_path_planner path_planner.launch.py algorithm:=rrt_star
 ros2 launch awsim_path_planner path_planner.launch.py algorithm:=route
 ```
 
+### Launch Ground Filter
+```bash
+# Start AWSIM, then launch the ground filter node
+ros2 launch ground_filter ground_filter.launch.py
+
+# With custom parameters
+ros2 launch ground_filter ground_filter.launch.py distance_threshold:=0.1 grid_size:=0.5
+```
+
+### Launch Object Tracker
+```bash
+# Start AWSIM, then launch the object tracker node
+ros2 launch awsim_object_tracker tracker.launch.py
+```
+
+
 
 ## 📚 Documentation
 
 - **[Path Planning Guide](src/awsim_path_planner/README.md)** - Multi-algorithm path planning with HD map integration
 - **[NDT Localization Guide](src/awsim_localization/README.md)** - Real-time positioning with demonstration video
 - **[Sensor Logger Guide](src/awsim_sensor_logger/README.md)** - Multi-sensor data collection and analysis
+- **[Object Tracker Guide](src/awsim_object_tracker/README.md)** - Real-time multi-object tracking from LiDAR point clouds
+- **[Ground Filter Guide](src/ground_filter/README.md)** - Ground point filtering for LiDAR data
 
 
 ## 📈 Future Research Directions
