@@ -134,7 +134,7 @@ void GroundFilter::pointcloud_callback(const sensor_msgs::msg::PointCloud2::Shar
   
   for (const auto& point : cloud->points) {
     // Exclude points above max_height_ from all outputs
-    if (point.z > max_height_) {
+    if (point.z > max_height_ || point.z < -1.5) {
       continue;
     }
     int grid_x = static_cast<int>(std::floor(point.x / grid_size_));

@@ -6,7 +6,7 @@ from launch.substitutions import LaunchConfiguration
 def generate_launch_description():
     max_height_arg = DeclareLaunchArgument(
         'max_height',
-        default_value='1.0',
+        default_value='2.0',
         description='Maximum height above the vehicle to consider a point (meters)'
     )
     # Declare launch arguments with default values
