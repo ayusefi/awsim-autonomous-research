@@ -12,7 +12,7 @@ Panels:
         - /TF1/Frames1
         - /MarkerArray4
       Splitter Ratio: 0.5
-    Tree Height: 363
+    Tree Height: 719
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Tool Properties
@@ -329,6 +329,23 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /awsim_object_tracker/tracked_objects_markers
       Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: MarkerArray
+      Namespaces:
+        obstacle_info: true
+        obstacle_orientation: true
+        obstacles: true
+        occupied_trajectories: true
+        safe_trajectories: true
+        selected_trajectory: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /planning/trajectory_planner/visualization_markers
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 0; 0; 0
@@ -374,7 +391,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: 0.5249999165534973
+      Angle: 0.5049999356269836
       Class: rviz_default_plugins/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
@@ -384,11 +401,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 4.446292877197266
+      Scale: 13.079005241394043
       Target Frame: <Fixed Frame>
       Value: TopDownOrtho (rviz_default_plugins)
-      X: 81408.1328125
-      Y: 49933.74609375
+      X: 81386.1875
+      Y: 49928.8125
     Saved: ~
 Window Geometry:
   Displays:

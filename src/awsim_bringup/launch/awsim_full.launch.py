@@ -101,6 +101,6 @@ def generate_launch_description():
         localization_launch,
         delayed_path_planner_launch,
         object_tracker_launch,
-        # delayed_trajectory_planner_launch,
+        delayed_trajectory_planner_launch,
         rviz_node,
     ])

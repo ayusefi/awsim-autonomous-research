@@ -7,6 +7,7 @@
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <std_msgs/msg/header.hpp>
 #include <multi_object_tracker_msgs/msg/tracked_object.hpp>
+#include <multi_object_tracker_msgs/msg/tracked_object_array.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <memory>
@@ -48,7 +49,7 @@ private:
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr point_cloud_sub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr markers_pub_;
-  rclcpp::Publisher<multi_object_tracker_msgs::msg::TrackedObject>::SharedPtr tracked_objects_pub_;
+  rclcpp::Publisher<multi_object_tracker_msgs::msg::TrackedObjectArray>::SharedPtr tracked_objects_pub_;
 
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;

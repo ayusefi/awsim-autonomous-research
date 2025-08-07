@@ -18,6 +18,7 @@ find_package(rosidl_default_generators REQUIRED)
 # Add custom message
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/TrackedObject.msg"
+  "msg/TrackedObjectArray.msg"
   DEPENDENCIES std_msgs geometry_msgs
 )
 

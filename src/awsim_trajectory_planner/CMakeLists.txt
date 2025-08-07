@@ -15,8 +15,10 @@ find_package(sensor_msgs REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
+
 # Include directories
 include_directories(include)
+find_package(multi_object_tracker_msgs REQUIRED)
 # Create trajectory planner library
 add_library(${PROJECT_NAME} SHARED
   src/trajectory_planner_node.cpp
@@ -36,6 +38,7 @@ ament_target_dependencies(${PROJECT_NAME}
   sensor_msgs
   rclcpp_components
   tf2_sensor_msgs
+  multi_object_tracker_msgs
 )
 # Create executable
 add_executable(trajectory_planner_node src/main.cpp)
@@ -54,6 +57,7 @@ ament_target_dependencies(trajectory_planner_node
   sensor_msgs
   rclcpp_components
   tf2_sensor_msgs
+  multi_object_tracker_msgs
 )
 # Export dependencies
 ament_export_targets(${PROJECT_NAME}_targets HAS_LIBRARY_TARGET)

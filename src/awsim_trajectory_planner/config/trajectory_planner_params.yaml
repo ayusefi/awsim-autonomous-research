@@ -19,7 +19,7 @@ trajectory_planner_node:
     comfort_weight: 5.0              
     
     # Safety parameters
-    safety_margin: 2.0               
+    safety_margin: 0.001               
     collision_check_resolution: 0.3  
     
     # Frame IDs

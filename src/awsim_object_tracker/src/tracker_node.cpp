@@ -28,7 +28,7 @@ TrackerNode::TrackerNode(const rclcpp::NodeOptions & options)
   // Create subscribers and publishers
   point_cloud_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
     input_topic_, 10, std::bind(&TrackerNode::pointCloudCallback, this, std::placeholders::_1));
-  tracked_objects_pub_ = create_publisher<multi_object_tracker_msgs::msg::TrackedObject>(
+  tracked_objects_pub_ = create_publisher<multi_object_tracker_msgs::msg::TrackedObjectArray>(
     output_topic_, 10);
   markers_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(
     marker_topic_, 10);
@@ -120,18 +120,19 @@ void TrackerNode::pointCloudCallback(
   // Update tracker with detections
   tracker_->update(detections);
   
-  // Publish tracked objects with reduced frequency
-  static int counter = 0;
-  if (++counter % 2 == 0) {  // Publish every other frame to reduce load
-    publishTrackedObjects(transformed_cloud.header);
-  }
-  
-  // Publish markers with minimal data
-  publishMarkers(transformed_cloud.header);
+  // Publish both tracked objects and markers at the same frequency
+  publishTrackedObjects(transformed_cloud.header);
+  // publishMarkers(transformed_cloud.header);
 }
 
 void TrackerNode::publishTrackedObjects(const std_msgs::msg::Header& header) {
   auto tracks = tracker_->getActiveTracks();  // Only publish active tracks for performance
+  
+  RCLCPP_DEBUG(get_logger(), "Publishing %zu tracked objects", tracks.size());
+  
+  // Create TrackedObjectArray message
+  multi_object_tracker_msgs::msg::TrackedObjectArray tracked_objects_array;
+  tracked_objects_array.header = header;
   
   for (const auto& track : tracks) {
     // Create tracked object message
@@ -181,9 +182,12 @@ void TrackerNode::publishTrackedObjects(const std_msgs::msg::Header& header) {
     tracked_obj.age = track->age;
     tracked_obj.time_since_update = track->time_since_update;
     
-    // Publish
-    tracked_objects_pub_->publish(tracked_obj);
+    // Add to array
+    tracked_objects_array.objects.push_back(tracked_obj);
   }
+  
+  // Publish the array
+  tracked_objects_pub_->publish(tracked_objects_array);
 }
 
 void TrackerNode::publishMarkers(const std_msgs::msg::Header& header) {
@@ -199,10 +203,8 @@ void TrackerNode::publishMarkers(const std_msgs::msg::Header& header) {
   std::set<int> current_marker_ids;
   
   for (const auto& track : tracks) {
-    // Skip tracks that haven't been updated recently (avoid trail effect)
-    if (track->time_since_update > 1) {  // More aggressive filtering
-      continue;
-    }
+    // Use the same filtering logic as publishTrackedObjects
+    // No additional time_since_update filtering
     
     current_marker_ids.insert(track->id);
     
@@ -268,6 +270,8 @@ void TrackerNode::publishMarkers(const std_msgs::msg::Header& header) {
   
   // Update previous marker IDs
   previous_marker_ids_ = current_marker_ids;
+  
+  RCLCPP_DEBUG(get_logger(), "Publishing %zu markers", marker_array.markers.size());
   
   // Publish all markers
   markers_pub_->publish(marker_array);

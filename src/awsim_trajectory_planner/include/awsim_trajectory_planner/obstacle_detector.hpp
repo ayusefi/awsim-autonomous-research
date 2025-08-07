@@ -1,3 +1,5 @@
+
+#include <multi_object_tracker_msgs/msg/tracked_object.hpp>
 #ifndef AWSIM_TRAJECTORY_PLANNER__OBSTACLE_DETECTOR_HPP_
 #define AWSIM_TRAJECTORY_PLANNER__OBSTACLE_DETECTOR_HPP_
 #include <vector>
@@ -23,6 +25,10 @@ struct Obstacle
   double width = 0.0;       // Width along local X axis
   double height = 0.0;      // Height along local Y axis
   double orientation = 0.0; // Rotation angle in radians (yaw)
+  
+  // Store original quaternion components for visualization consistency with tracker
+  double original_quat_z = 0.0;
+  double original_quat_w = 1.0;
   
   // Axis-aligned bounding box (for backward compatibility and quick checks)
   double x_min = 0.0;
@@ -165,6 +171,8 @@ struct ObstacleDetectionParams
 class ObstacleDetector
 {
 public:
+  // Create obstacles from tracked objects
+  std::vector<Obstacle> obstaclesFromTrackedObjects(const std::vector<multi_object_tracker_msgs::msg::TrackedObject>& tracked_objects) const;
   explicit ObstacleDetector(const ObstacleDetectionParams& params);
   ObstacleDetector(const ObstacleDetectionParams& params, rclcpp::Node* node);
   ~ObstacleDetector() = default;

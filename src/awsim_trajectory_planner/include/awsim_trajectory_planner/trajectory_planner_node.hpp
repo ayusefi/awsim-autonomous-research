@@ -1,26 +1,28 @@
-#pragma once
-
-#include "awsim_trajectory_planner/trajectory_generator.hpp"
-#include "awsim_trajectory_planner/obstacle_detector.hpp"
-#include "awsim_trajectory_planner/cost_evaluator.hpp"
+#ifndef AWSIM_TRAJECTORY_PLANNER__TRAJECTORY_PLANNER_NODE_HPP_
+#define AWSIM_TRAJECTORY_PLANNER__TRAJECTORY_PLANNER_NODE_HPP_
 
 #include <rclcpp/rclcpp.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
+#include <multi_object_tracker_msgs/msg/tracked_object.hpp>
+#include <multi_object_tracker_msgs/msg/tracked_object_array.hpp>
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 
 #include <memory>
 #include <chrono>
+#include <vector>
 
-namespace awsim_trajectory_planner
-{
+#include "awsim_trajectory_planner/trajectory_generator.hpp"
+#include "awsim_trajectory_planner/obstacle_detector.hpp"
+#include "awsim_trajectory_planner/cost_evaluator.hpp"
 
-struct TrajectoryPlannerParams
-{
+namespace awsim_trajectory_planner {
+
+struct TrajectoryPlannerParams {
   double prediction_horizon = 10.0;
   double time_step = 0.1;
   int num_rollouts = 15;
@@ -40,10 +42,9 @@ struct TrajectoryPlannerParams
   double collision_check_resolution = 0.1;
 };
 
-class TrajectoryPlannerNode : public rclcpp::Node
-{
+class TrajectoryPlannerNode : public rclcpp::Node {
 public:
-  explicit TrajectoryPlannerNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
+  explicit TrajectoryPlannerNode(const rclcpp::NodeOptions& options = rclcpp::NodeOptions());
 
 private:
   void initializeParameters();
@@ -52,8 +53,8 @@ private:
   
   void globalPathCallback(const nav_msgs::msg::Path::SharedPtr msg);
   void poseWithCovarianceCallback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg);
-  void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
-  
+  void trackedObjectsCallback(const multi_object_tracker_msgs::msg::TrackedObjectArray::SharedPtr msg);
+
   void planTrajectory();
   void publishTrajectories(const nav_msgs::msg::Path& selected_trajectory);
   void publishVisualization(
@@ -61,10 +62,8 @@ private:
     const std::vector<TrajectoryCost>& costs,
     int selected_idx,
     const std::vector<Obstacle>& obstacles);
-  
 
   geometry_msgs::msg::Point createPoint(double x, double y, double z) const;
-
   nav_msgs::msg::Path createCurrentPosePath();
   double estimateVelocity();
 
@@ -80,7 +79,7 @@ private:
   // Subscribers
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr global_path_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
+  rclcpp::Subscription<multi_object_tracker_msgs::msg::TrackedObjectArray>::SharedPtr tracked_objects_sub_;
 
   // Publishers
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr local_trajectory_pub_;
@@ -98,7 +97,9 @@ private:
   nav_msgs::msg::Path::SharedPtr global_path_;
   geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr current_pose_;
   geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr previous_pose_;
-  sensor_msgs::msg::PointCloud2::SharedPtr latest_pointcloud_;
+  multi_object_tracker_msgs::msg::TrackedObjectArray::SharedPtr latest_tracked_objects_;
 };
 
 }  // namespace awsim_trajectory_planner
+
+#endif  // AWSIM_TRAJECTORY_PLANNER__TRAJECTORY_PLANNER_NODE_HPP_
