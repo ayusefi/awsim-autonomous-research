@@ -136,6 +136,10 @@ private:
   bool use_route_planning_;
   bool visualize_search_space_;
   
+  // Planning mode parameters
+  std::string planning_mode_;  // "dynamic" or "static"
+  bool static_planning_mode_;  // true for static, false for dynamic
+  
   // Route planning parameters
   std::string traffic_rules_name_;
   std::string participant_name_;

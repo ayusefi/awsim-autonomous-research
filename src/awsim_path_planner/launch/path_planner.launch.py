@@ -60,6 +60,12 @@ def generate_launch_description():
         description='Launch lanelet visualizer for HD map visualization'
     )
     
+    planning_mode_arg = DeclareLaunchArgument(
+        'planning_mode',
+        default_value='static',
+        description='Planning mode: dynamic (replans as vehicle moves) or static (plans only once per goal)'
+    )
+    
     # Get package share directory
     pkg_share = get_package_share_directory('awsim_path_planner')
     
@@ -71,6 +77,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'planning_algorithm': LaunchConfiguration('planning_algorithm'),
+            'planning_mode': LaunchConfiguration('planning_mode'),
             'map_frame': 'map',
             'base_link_frame': 'base_link',
             'lanelet_map_path': LaunchConfiguration('hd_map_path'),  # Fixed parameter name
@@ -179,6 +186,7 @@ def generate_launch_description():
         use_rviz_arg,
         visualize_search_space_arg,
         use_lanelet_visualizer_arg,
+        planning_mode_arg,
         
         GroupAction([
             path_planner_node,

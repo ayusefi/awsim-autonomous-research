@@ -1,0 +1,32 @@
+pure_pursuit_controller:
+  ros__parameters:
+    wheel_base: 2.7
+    dt: 0.05
+    max_steer: 0.6
+
+    # Speed limits and safety
+    target_speed_mps: 4.0
+    max_speed_mps: 6.0
+    min_speed_mps: 0.1
+    max_accel: 2.0
+    max_decel: -2.5
+    max_lateral_accel: 1.2
+    comfort_decel: 1.5
+    velocity_lookahead_distance: 20.0
+    turn_slowdown_margin: 0.05
+
+    # Lookahead behavior (dynamic Ld = base + gain * v)
+    lookahead_base: 5.0
+    lookahead_gain: 1.5
+    lookahead_min: 2.0
+    lookahead_max: 18.0
+
+    # Steering smoothing
+    max_steer_rate: 0.5
+    steer_alpha: 0.2
+    steering_lpf_cutoff_hz: 2.0
+    accel_alpha: 0.5
+    kp_accel: 0.6
+
+    # Visualization
+    predicted_path_duration: 4.0

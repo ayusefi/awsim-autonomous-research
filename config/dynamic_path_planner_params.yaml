@@ -1,0 +1,19 @@
+path_planner_node:
+  ros__parameters:
+    planning_algorithm: "route"
+    planning_mode: "dynamic"  # Dynamic mode - replans as vehicle moves
+    map_frame: "map"
+    base_link_frame: "base_link"
+    lanelet_map_path: "/home/abdullah/workspaces/career_sprint/awsim-autonomous-research/shinjuku_map/map/lanelet2_map.osm"
+    grid_resolution: 0.5
+    planning_timeout: 5.0
+    max_planning_range: 1000.0
+    use_route_planning: true
+    visualize_search_space: true
+    
+    # Route planning parameters
+    route_planner.traffic_rules_name: "de"  # German traffic rules
+    route_planner.participant_name: "vehicle"
+    route_planner.goal_search_radius: 150.0
+    route_planner.centerline_resolution: 1.0
+    route_planner.enable_lane_change: true

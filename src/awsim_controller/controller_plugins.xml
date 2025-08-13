@@ -1,0 +1,8 @@
+<library path="pure_pursuit_controller">
+  <class
+    name="awsim_controller/PurePursuitController"
+    type="awsim_controller::PurePursuitController"
+    base_class_type="rclcpp::Node">
+    <description>Pure Pursuit Controller node</description>
+  </class>
+</library>

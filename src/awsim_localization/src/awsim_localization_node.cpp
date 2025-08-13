@@ -56,7 +56,7 @@ AwsimLocalizationNode::AwsimLocalizationNode(const rclcpp::NodeOptions & options
   
   // Create publishers with appropriate QoS profiles
   pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-    "/localization/pose_with_covariance", createLocalizationQoS());
+    "/localization/ground_truth_pose", createLocalizationQoS());
   
   odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(
     "/localization/kinematic_state", createLocalizationQoS());
@@ -71,7 +71,7 @@ AwsimLocalizationNode::AwsimLocalizationNode(const rclcpp::NodeOptions & options
     "/localization/status", createLocalizationQoS());
   
   ground_truth_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-    "/localization/ground_truth_pose", createLocalizationQoS());
+    "/localization/pose_with_covariance", createLocalizationQoS());
   
   ground_truth_odom_pub_ = this->create_publisher<nav_msgs::msg::Odometry>(
     "/localization/ground_truth_odom", createLocalizationQoS());

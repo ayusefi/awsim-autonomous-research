@@ -92,6 +92,7 @@ PathPlannerNode::PathPlannerNode(const rclcpp::NodeOptions & options)
   
   RCLCPP_INFO(this->get_logger(), "Path Planner Node initialized successfully");
   RCLCPP_INFO(this->get_logger(), "Planning algorithm: %s", planning_algorithm_.c_str());
+  RCLCPP_INFO(this->get_logger(), "Planning mode: %s", planning_mode_.c_str());
   RCLCPP_INFO(this->get_logger(), "Grid resolution: %.2f m", grid_resolution_);
   RCLCPP_INFO(this->get_logger(), "Max planning range: %.2f m", max_planning_range_);
 }
@@ -108,6 +109,9 @@ void PathPlannerNode::initialize_parameters()
   this->declare_parameter("max_planning_range", 1000.0);
   this->declare_parameter("use_route_planning", true);
   this->declare_parameter("visualize_search_space", true);
+  
+  // Planning mode parameters
+  this->declare_parameter("planning_mode", "dynamic");  // "dynamic" or "static"
   
   // Route planning parameters
   this->declare_parameter("route_planner.traffic_rules_name", "german");
@@ -157,6 +161,10 @@ void PathPlannerNode::initialize_parameters()
   max_planning_range_ = this->get_parameter("max_planning_range").as_double();
   use_route_planning_ = this->get_parameter("use_route_planning").as_bool();
   visualize_search_space_ = this->get_parameter("visualize_search_space").as_bool();
+  
+  // Planning mode parameter
+  planning_mode_ = this->get_parameter("planning_mode").as_string();
+  static_planning_mode_ = (planning_mode_ == "static");
   
   // Route planning parameters
   traffic_rules_name_ = this->get_parameter("route_planner.traffic_rules_name").as_string();
@@ -263,8 +271,9 @@ void PathPlannerNode::current_pose_callback(
   
   has_current_pose_ = true;
   
-  // Attempt planning if we have both current pose and goal
-  if (has_current_pose_ && has_goal_pose_) {
+  // Only trigger replanning in dynamic mode when vehicle moves
+  // In static mode, planning only happens when a new goal is received
+  if (!static_planning_mode_ && has_current_pose_ && has_goal_pose_) {
     plan_path(current_pose_, goal_pose_);
   }
 }
@@ -285,11 +294,16 @@ void PathPlannerNode::goal_pose_callback(const geometry_msgs::msg::PoseStamped::
   
   has_goal_pose_ = true;
   
-  RCLCPP_INFO(this->get_logger(), "Received goal pose at (%.2f, %.2f)",
-              goal_pose_.pose.position.x, goal_pose_.pose.position.y);
+  RCLCPP_INFO(this->get_logger(), "Received goal pose at (%.2f, %.2f) - Planning mode: %s",
+              goal_pose_.pose.position.x, goal_pose_.pose.position.y, planning_mode_.c_str());
   
-  // Attempt planning if we have both current pose and goal
+  // Always attempt planning when a new goal is received (both static and dynamic modes)
   if (has_current_pose_ && has_goal_pose_) {
+    if (static_planning_mode_) {
+      RCLCPP_INFO(this->get_logger(), "Static mode: Planning path once to new goal");
+    } else {
+      RCLCPP_INFO(this->get_logger(), "Dynamic mode: Planning path to new goal (will replan as vehicle moves)");
+    }
     plan_path(current_pose_, goal_pose_);
   }
 }
