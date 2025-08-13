@@ -186,7 +186,6 @@ ros2 launch awsim_bringup awsim_full.launch.py
 - **Multi-sensor fusion** for robust localization (LiDAR + GNSS + IMU)
 - **Deep learning integration** for semantic mapping and planning
 - **Dynamic environment handling** for moving objects and pedestrians
-- **Real-world deployment** and hardware-in-the-loop testing
 
 ⭐ **If you find this project helpful for your autonomous driving research, please give it a star!**
 
